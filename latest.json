@@ -1,7 +1,7 @@
 {
-  "versionCode": 6,
-  "versionName": "0.4.1",
-  "apkUrl": "https://github.com/the-bollard/podcast-library-updates/releases/download/v0.4.1/podcast-library-0.4.1.apk",
-  "sha256": "9a35f46bfcf1aaa30b27db828675992e52740af2994b139fe2b62b19651f13ea",
-  "notes": "Podcast Library 0.4.1"
+  "versionCode": 7,
+  "versionName": "0.4.2",
+  "apkUrl": "https://github.com/the-bollard/podcast-library-updates/releases/download/v0.4.2/podcast-library-0.4.2.apk",
+  "sha256": "5bef9468ae306da20c80543aa1b7835414f631c662f4385c3bb1ba0037e829f8",
+  "notes": "Podcast Library 0.4.2"
 }
