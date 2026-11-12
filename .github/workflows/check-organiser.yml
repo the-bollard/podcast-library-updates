@@ -1,0 +1,31 @@
+name: Check Podcasts Organiser
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'organiser/**'
+      - '.github/workflows/check-organiser.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  static-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate self-contained browser editor
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const html = fs.readFileSync('organiser/index.html', 'utf8');
+          const code = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+          if (!code) throw new Error('Inline editor script missing');
+          new Function(code);
+          if (!html.includes('podcasts-organiser') || !html.includes('baselinePlacements')) {
+            throw new Error('Expected organiser transfer format missing');
+          }
+          if (/<script[^>]+src=/.test(html) || /\bfetch\s*\(/.test(code)) {
+            throw new Error('Editor must remain self-contained and make no fetch requests');
+          }
+          console.log('Organiser JavaScript syntax and privacy checks passed');
+          NODE
