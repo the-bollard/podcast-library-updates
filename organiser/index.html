@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Podcasts | Library Organiser</title>
+<style>
+:root{color-scheme:dark;--bg:#101014;--panel:#1c1c24;--card:#24252d;--line:#383942;--muted:#b5b5bf;--text:#f6f5f2;--accent:#ffb87c;--orange:#ff961b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+button,input,select{font:inherit}button,select,input{color:var(--text)}button{cursor:pointer;border:1px solid var(--line);border-radius:9px;padding:.54rem .83rem;background:#292a33;font-weight:600}
+button:hover:not(:disabled){border-color:var(--accent)}button:focus-visible,input:focus-visible,select:focus-visible,.item:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+button:disabled{cursor:not-allowed;opacity:.44}.primary{color:#18130c;background:var(--accent);border-color:var(--accent)}.muted{background:transparent;color:var(--muted)}
+header{display:flex;align-items:center;gap:14px;padding:17px max(20px,calc((100vw - 1440px)/2));border-bottom:1px solid var(--line);background:#18181e}
+.brand{display:flex;align-items:center;gap:12px}.brand h1{font-size:21px;line-height:1.1;margin:0;font-weight:800;letter-spacing:-.5px}.brand small{color:var(--muted)}
+.logo{height:50px;width:50px;display:block;border-radius:12px;background:#20212a;padding:5px}.header-right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.wrap{max-width:1440px;margin:auto;padding:18px;display:grid;grid-template-columns:290px minmax(0,1fr);gap:16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;min-width:0}.sidebar{padding:14px;max-height:calc(100vh - 122px);overflow:auto}
+.sidebar h2{margin:0 0 12px;font-size:16px}h3{font-size:14px;margin:18px 0 7px;color:var(--muted);font-weight:700}
+.sidebar button{display:block;text-align:left;width:100%;background:transparent;border:1px solid transparent;padding:9px 10px;font-weight:550}
+.sidebar button.active{background:#3b312a;color:var(--accent);border-color:#785139}
+.section-row{display:flex;gap:4px;align-items:center}.section-row .edit{width:auto;padding:8px;background:transparent;color:var(--muted);font-size:12px}
+.section-row .label{flex:1;min-width:0;text-align:left;white-space:normal;overflow-wrap:anywhere}
+.sidebar .extra{font-size:12px;color:var(--muted);margin-left:6px;font-weight:400}
+.main{padding:20px;min-height:480px}h2{margin:0;font-size:23px}.subtle{color:var(--muted);font-size:14px}.intro{max-width:800px;margin:0 auto;padding:42px 14px}
+.intro h2{font-size:28px;margin-bottom:10px}.intro ol{padding-left:22px;line-height:1.9}
+.file-drop{margin:20px 0;padding:25px;border:2px dashed #6c6261;border-radius:14px;text-align:center;background:#24252c}.file-drop.drag{border-color:var(--orange);background:#332820}
+.file-drop input{max-width:100%;width:290px}.section-head{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.toolbar{display:flex;gap:9px;flex-wrap:wrap;margin:19px 0 12px;align-items:center}
+input[type=search],select{background:#25252d;border:1px solid #55545b;border-radius:9px;padding:10px 12px;min-height:42px}
+input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:12px;background:#24242c;border-radius:10px;margin-bottom:12px}
+.bulk select{min-width:150px;flex:1 1 160px}.counter{color:var(--accent);font-weight:700;padding:0 5px}
+.episode-list{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.episode-list li{border-bottom:1px solid var(--line)}.episode-list li:last-child{border-bottom:0}
+.item{display:flex;gap:12px;align-items:flex-start;padding:13px 15px}.item:hover{background:#272731}.item input{width:18px;height:18px;flex:none;accent-color:var(--orange);margin-top:4px}
+.ep-title{font-weight:650}.ep-meta{font-size:12px;color:var(--muted);margin-top:2px}.tag{color:#f3bd8f;background:#3c3029;border-radius:5px;padding:1px 5px;display:inline-block;margin:3px 3px 0 0}
+.message{margin:8px 0;padding:9px 12px;border:1px solid var(--line);border-radius:8px;color:var(--muted)}.message strong{color:var(--text)}
+#toast{margin:0 20px 12px;min-height:0;color:#e9c39c}.footer{font-size:12px;color:var(--muted);margin:28px 0 0}
+.count{font-size:12px;color:var(--muted);font-weight:400}.hidden{display:none!important}
+@media(max-width:850px){.wrap{grid-template-columns:1fr}.sidebar{max-height:none}.main{padding:16px}header{padding:12px 16px}.brand h1{font-size:19px}.header-right{gap:5px}.header-right button{padding:7px 10px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 64 64" role="img" aria-label="Orange bookshelf and waveform logo">
+      <rect x="3" y="44" width="58" height="6" rx="3" fill="#ff961b"/>
+      <rect x="9" y="19" width="10" height="23" rx="3" transform="rotate(12 14 30)" fill="#ff961b"/>
+      <rect x="21" y="12" width="10" height="30" rx="3" fill="#ff961b"/>
+      <rect x="33" y="4" width="10" height="38" rx="3" fill="#ff961b"/>
+      <rect x="45" y="18" width="10" height="24" rx="3" transform="rotate(-12 50 30)" fill="#ff961b"/>
+      <path d="M22 20h8M34 13h8M46 26h7" stroke="#95510c" stroke-width="2.2"/>
+    </svg>
+    <div><h1>Podcasts</h1><small>Library Organiser</small></div>
+  </div>
+  <div class="header-right">
+    <button id="undo" disabled title="Undo the last edit">Undo</button>
+    <button id="save" class="primary" disabled>Download changes</button>
+  </div>
+</header>
+<div id="toast" role="status" aria-live="polite"></div>
+<div class="wrap">
+  <aside class="panel sidebar" id="side" aria-label="Podcasts and collections">
+    <h2>Your library</h2><p class="subtle">Open an export to see your podcasts and arcs.</p>
+  </aside>
+  <main class="panel main" id="main">
+    <section class="intro">
+      <h2>Organise episodes in one go.</h2>
+      <p>Rename arcs, select multiple episodes and move them wherever they belong. Nothing changes on your phone until you import the finished file.</p>
+      <ol>
+        <li>In the <strong>Podcasts</strong> Android app, open <strong>Options → Settings → Export library for website</strong>.</li>
+        <li>Open that JSON file here, then organise as many episodes as you like.</li>
+        <li>Choose <strong>Download changes</strong> and import the new JSON through <strong>Settings → Import edited organisation</strong>.</li>
+      </ol>
+      <div class="file-drop" id="drop">
+        <label for="file">Open your exported Podcasts JSON</label><br><br>
+        <input id="file" type="file" accept=".json,application/json">
+        <p class="subtle">You can also drag and drop the file here.</p>
+      </div>
+      <p class="footer">Private by design: this page runs entirely in your browser. It makes no network requests and never asks for RSS passwords or Patreon links. Your files are not uploaded to GitHub.</p>
+    </section>
+  </main>
+</div>
+<script>
+"use strict";
+(() => {
+  const $ = id => document.getElementById(id);
+  let library = null, activeFeed = null, activeSection = "all", selection = new Set(), search = "", history = [];
+  const MAX_RENDER = 400;
+  const el = (tag, cls, text) => {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = String(text);
+    return node;
+  };
+  const notify = message => { $("toast").textContent = message; };
+  const ident = x => String(x);
+  const feedSections = () => library.collections.filter(c => ident(c.subscriptionId) === ident(activeFeed));
+  const feedEpisodes = () => library.episodes.filter(e => ident(e.subscriptionId) === ident(activeFeed));
+  const links = () => library.placements.filter(p => ident(p.subscriptionId) === ident(activeFeed));
+  const keyFor = p => ident(p.collectionId) + "|" + ident(p.subscriptionId) + "|" + p.episodeKey;
+  const descendants = id => {
+    const ids = new Set([ident(id)]), pending = [ident(id)];
+    while (pending.length) {
+      const parent = pending.shift();
+      feedSections().filter(c => ident(c.parentId) === parent).forEach(c => {
+        const k = ident(c.id);
+        if (!ids.has(k)) { ids.add(k); pending.push(k); }
+      });
+    }
+    return ids;
+  };
+  const membership = () => {
+    const map = new Map(feedEpisodes().map(e => [e.key, new Set()]));
+    links().forEach(p => { if (map.has(p.episodeKey)) map.get(p.episodeKey).add(ident(p.collectionId)); });
+    return map;
+  };
+  const episodeCount = sectionId => {
+    const ids = descendants(sectionId);
+    return new Set(links().filter(p => ids.has(ident(p.collectionId))).map(p => p.episodeKey)).size;
+  };
+  const backup = () => {
+    history.push({collections: structuredClone(library.collections), placements: structuredClone(library.placements)});
+    if (history.length > 25) history.shift();
+    $("undo").disabled = false;
+  };
+  const button = (label, action, cls = "") => {
+    const b = el("button", cls, label); b.type = "button"; b.addEventListener("click", action); return b;
+  };
+  const put = (parent, ...children) => children.forEach(child => parent.append(child));
+  function validate(data) {
+    if (!data || data.format !== "podcasts-organiser" || data.version !== 1 ||
+        !["subscriptions", "episodes", "collections", "placements", "baselinePlacements"].every(k => Array.isArray(data[k])))
+      throw Error("This isn't a compatible Podcasts Organiser file. Export a fresh copy from the Android app.");
+    if (data.episodes.length > 100000 || data.collections.length > 10000 || data.placements.length > 500000)
+      throw Error("This file is unexpectedly large.");
+    return data;
+  }
+  async function openFile(file) {
+    if (!file) return;
+    if (file.size > 15 * 1024 * 1024) { notify("File too large. Export a fresh JSON from the app."); return; }
+    try {
+      const data = validate(JSON.parse(await file.text()));
+      library = data; activeFeed = data.subscriptions[0]?.id ?? null; activeSection = "all";
+      selection.clear(); history = []; search = "";
+      $("undo").disabled = true; $("save").disabled = false;
+      notify("Loaded " + data.subscriptions.length + " podcasts and " + data.episodes.length + " episode titles. Edits stay on this device until you download a JSON.");
+      render();
+    } catch (e) { notify(e.message || "Couldn't read that file."); }
+  }
+  $("file").addEventListener("change", e => openFile(e.target.files[0]));
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach(event => drop.addEventListener(event, e => { e.preventDefault(); drop.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach(event => drop.addEventListener(event, e => { e.preventDefault(); drop.classList.remove("drag"); }));
+  drop.addEventListener("drop", e => openFile(e.dataTransfer.files[0]));
+  $("undo").addEventListener("click", () => {
+    const previous = history.pop();
+    if (!previous) return;
+    library.collections = previous.collections; library.placements = previous.placements;
+    selection.clear(); $("undo").disabled = history.length === 0;
+    notify("Last edit undone."); render();
+  });
+  $("save").addEventListener("click", () => {
+    if (!library) return;
+    const blob = new Blob([JSON.stringify(library, null, 2)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url;
+    a.download = "podcasts-organised-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    notify("Edited organisation downloaded. In Podcasts on your phone, choose Settings → Import edited organisation.");
+  });
+  function editName(collection) {
+    const revised = prompt("Name this arc or section:", collection.name);
+    if (revised === null || !revised.trim()) return;
+    const name = revised.trim();
+    if (name.length > 120) { notify("Arc names must be 120 characters or fewer."); return; }
+    if (name === collection.name) return;
+    backup(); collection.name = name; notify("Renamed to " + name + "."); render();
+  }
+  function addArc() {
+    const raw = prompt("New arc name:");
+    if (raw === null || !raw.trim()) return;
+    const name = raw.trim();
+    if (name.length > 120) { notify("Arc names must be 120 characters or fewer."); return; }
+    if (feedSections().some(c => c.parentId == null && c.name.toLowerCase() === name.toLowerCase())) {
+      notify("That arc already exists."); return;
+    }
+    backup();
+    const id = Math.min(0, ...library.collections.map(c => Number(c.id))) - 1;
+    const position = Math.max(-1, ...feedSections().filter(c => c.parentId == null).map(c => Number(c.position)||0)) + 1;
+    library.collections.push({id, subscriptionId:activeFeed, parentId:null, name, position});
+    activeSection = id; selection.clear(); notify("Arc added: " + name + "."); render();
+  }
+  function pickFeed(feedId) { activeFeed = feedId; activeSection = "all"; selection.clear(); search = ""; render(); }
+  function pickSection(id) { activeSection = id; selection.clear(); search = ""; render(); }
+  function renderSidebar() {
+    const side = $("side"); side.replaceChildren(el("h2", "", "Your library"));
+    if (!library) return;
+    const podcasts = library.subscriptions.slice().sort((a,b) => a.title.localeCompare(b.title));
+    for (const feed of podcasts) {
+      const b = button(feed.title, () => pickFeed(feed.id), ident(feed.id) === ident(activeFeed) ? "active" : "");
+      side.append(b);
+    }
+    if (activeFeed == null) return;
+    const title = library.subscriptions.find(f=>ident(f.id)===ident(activeFeed))?.title || "Podcast";
+    side.append(el("h3", "", title + " sections"));
+    side.append(button("All episodes  (" + feedEpisodes().length + ")", () => pickSection("all"), activeSection==="all"?"active":""));
+    const unassigned = feedEpisodes().length - new Set(links().map(p=>p.episodeKey)).size;
+    side.append(button("Unassigned  (" + unassigned + ")", () => pickSection("unassigned"), activeSection==="unassigned"?"active":""));
+    const rootSections = feedSections().filter(c => c.parentId == null).sort((a,b) => Number(a.position)-Number(b.position));
+    rootSections.forEach(section => {
+      const row = el("div", "section-row");
+      const b = button(section.name + "  (" + episodeCount(section.id) + ")", () => pickSection(section.id),
+        "label" + (ident(activeSection) === ident(section.id) ? " active" : ""));
+      const ren = button("Rename", () => editName(section), "edit");
+      ren.setAttribute("aria-label", "Rename " + section.name);
+      put(row,b,ren); side.append(row);
+    });
+    const actions = el("div"); actions.style.marginTop = "16px";
+    actions.append(button("+ New arc", addArc, "primary")); side.append(actions);
+    side.append(el("p","footer","Season folders stay attached to their parent arc. You can assign episodes directly to the arc."));
+  }
+  const fmt = stamp => {
+    if (stamp == null || !Number.isFinite(Number(stamp))) return "";
+    const d = new Date(Number(stamp));
+    return Number.isNaN(d.valueOf()) ? "" : new Intl.DateTimeFormat("en-GB",{day:"numeric",month:"short",year:"numeric"}).format(d);
+  };
+  function visibleEpisodes() {
+    const m = membership();
+    const ids = activeSection === "all" || activeSection === "unassigned" ? null : descendants(activeSection);
+    const q = search.trim().toLowerCase();
+    return feedEpisodes().filter(e => {
+      if (q && !e.title.toLowerCase().includes(q)) return false;
+      const assigned = m.get(e.key) || new Set();
+      if (activeSection === "unassigned") return assigned.size === 0;
+      if (ids) return [...assigned].some(id => ids.has(id));
+      return true;
+    }).sort((a,b) => (Number(b.published)||0)-(Number(a.published)||0) || a.title.localeCompare(b.title));
+  }
+  function bulk(action, target) {
+    if (!selection.size) { notify("Select at least one episode first."); return; }
+    const id = Number(target);
+    if ((action==="move" || action==="add") && !feedSections().some(c => Number(c.id) === id)) {
+      notify("Choose a destination arc first."); return;
+    }
+    backup();
+    const chosen = new Set(selection);
+    const before = library.placements.length;
+    if (action === "move") {
+      library.placements = library.placements.filter(p =>
+        ident(p.subscriptionId) !== ident(activeFeed) || !chosen.has(p.episodeKey));
+    } else if (action === "remove") {
+      const eligible = activeSection === "all" || activeSection === "unassigned"
+        ? null : descendants(activeSection);
+      library.placements = library.placements.filter(p =>
+        ident(p.subscriptionId) !== ident(activeFeed) || !chosen.has(p.episodeKey) ||
+        (eligible && !eligible.has(ident(p.collectionId))));
+    }
+    if (action === "move" || action === "add") for (const key of chosen) {
+      if (!library.placements.some(p => ident(p.subscriptionId)===ident(activeFeed) &&
+            ident(p.collectionId)===ident(id) && p.episodeKey===key)) {
+        library.placements.push({subscriptionId:activeFeed,collectionId:id,episodeKey:key});
+      }
+    }
+    const edited = chosen.size;
+    selection.clear(); notify(edited + " episodes updated. " + Math.abs(library.placements.length-before) + " assignment links changed.");
+    render();
+  }
+  function renderMain() {
+    const main = $("main"); main.replaceChildren();
+    if (!library) return;
+    if (activeFeed === null) { main.append(el("p","subtle","The file contains no podcasts.")); return; }
+    const sections = feedSections();
+    const active = sections.find(c => ident(c.id)===ident(activeSection));
+    const title = activeSection === "all" ? "All episodes" :
+      activeSection === "unassigned" ? "Unassigned episodes" : active?.name || "All episodes";
+    const head = el("div","section-head");
+    const heading = el("div");
+    heading.append(el("h2","",title));
+    heading.append(el("p","subtle","Tick several episodes, then move or add them to an arc. Changes stay in this browser until download."));
+    head.append(heading); main.append(head);
+    const toolbar = el("div","toolbar");
+    const find = el("input"); find.type="search"; find.placeholder="Search episode titles"; find.setAttribute("aria-label","Search episodes");
+    find.value = search;
+    find.addEventListener("input",() => {search=find.value; selection.clear(); renderMain(); const restored=$("search-episodes");restored.focus();restored.setSelectionRange(search.length,search.length);});
+    find.id="search-episodes";
+    toolbar.append(find);
+    toolbar.append(button("Select all matching", () => { visibleEpisodes().forEach(e=>selection.add(e.key)); renderMain(); }));
+    toolbar.append(button("Clear selection", () => { selection.clear(); renderMain(); }, "muted"));
+    main.append(toolbar);
+
+    const bulkbar = el("div","bulk");
+    const counter = el("span","counter",selection.size+" selected");
+    bulkbar.append(counter);
+    const dest = el("select"); dest.id="dest"; dest.setAttribute("aria-label","Destination arc");
+    dest.append(new Option("Choose an arc…",""));
+    sections.filter(c=>c.parentId==null).sort((a,b)=>a.name.localeCompare(b.name)).forEach(c=>dest.append(new Option(c.name,ident(c.id))));
+    if (active && active.parentId == null) dest.value = ident(active.id);
+    bulkbar.append(dest);
+    bulkbar.append(button("Move selected", () => bulk("move", dest.value), "primary"));
+    bulkbar.append(button("Also add to arc", () => bulk("add", dest.value)));
+    bulkbar.append(button("Remove assignments", () => bulk("remove", ""), "muted"));
+    main.append(bulkbar);
+    const current = visibleEpisodes();
+    main.append(el("p","subtle",current.length+" matching episodes" +
+      (current.length>MAX_RENDER ? " (showing first "+MAX_RENDER+"; search to narrow)" : "") +
+      ". Select all matching includes the full filtered list."));
+    const list = el("ul","episode-list"); list.setAttribute("aria-label","Episodes");
+    const byId = new Map(sections.map(c=>[ident(c.id),c]));
+    const currentMembership = membership();
+    current.slice(0,MAX_RENDER).forEach(episode => {
+      const li=el("li");
+      const label=el("label","item");
+      const cb=el("input"); cb.type="checkbox"; cb.checked=selection.has(episode.key);
+      cb.addEventListener("change",()=>{
+        if(cb.checked) selection.add(episode.key); else selection.delete(episode.key);
+        counter.textContent=selection.size+" selected";
+      });
+      const info=el("div");
+      info.append(el("div","ep-title",episode.title));
+      const date=fmt(episode.published); if(date) info.append(el("div","ep-meta","Released "+date));
+      const assigned=[...(currentMembership.get(episode.key)||[])];
+      const tags=el("div","ep-meta");
+      if(assigned.length) assigned.forEach(id=>tags.append(el("span","tag",byId.get(id)?.name || "Section "+id)));
+      else tags.append(el("span","", "Unassigned"));
+      info.append(tags); put(label,cb,info); li.append(label); list.append(li);
+    });
+    main.append(list);
+    if(!current.length) main.append(el("p","message","No matching episodes here. Try All episodes or change the search."));
+    main.append(el("p","footer","No website accounts, no upload and no live syncing. The edited JSON changes only collections and episode assignments when imported into Podcasts."));
+  }
+  function render() { renderSidebar(); renderMain(); }
+})();
+</script>
+</body>
+</html>
