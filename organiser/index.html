@@ -435,7 +435,7 @@ dialog::backdrop{background:#05050bc9}
   function suggestedArcBase(title) {
     const segments = title.split(/\s*\|\s*/u)
       .map(section => section.replace(/\s+/gu, " ").trim()).filter(Boolean);
-    const partSuffix = /\s*(?:[-–—:]\s*)?(?:part|pt\.?|episode|ep\.?|chapter|ch\.?|session)\s*(?:#|no\.?\s*)?(?:\d{1,4}|[IVXLCDM]{1,7})(?:\s*(?:of|\/)\s*\d{1,4})?\s*$/iu;
+    const partSuffix = /(?:\s+|[-–—:]\s*)(?:part|pt\.?|episode|ep\.?|chapter|ch\.?|session)\s*(?:#|no\.?\s*)?(?:\d{1,4}|[IVXLCDM]{1,7})(?:\s*(?:of|\/)\s*\d{1,4})?\s*$/iu;
     for (const section of segments) {
       const match = section.match(partSuffix);
       if (!match) continue;
