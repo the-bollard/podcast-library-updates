@@ -40,6 +40,18 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
 .message{margin:8px 0;padding:9px 12px;border:1px solid var(--line);border-radius:8px;color:var(--muted)}.message strong{color:var(--text)}
 #toast{margin:0 20px 12px;min-height:0;color:#e9c39c}.footer{font-size:12px;color:var(--muted);margin:28px 0 0}
 .count{font-size:12px;color:var(--muted);font-weight:400}.hidden{display:none!important}
+dialog{color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:0;width:min(530px,calc(100vw - 32px));max-height:min(700px,calc(100vh - 40px));box-shadow:0 22px 65px #0009}
+dialog::backdrop{background:#05050bc9}
+.arc-dialog-inner{padding:22px;display:flex;flex-direction:column;gap:13px;max-height:calc(100vh - 45px)}
+.arc-dialog-inner h2{font-size:22px;margin:0}.arc-dialog-inner p{margin:0}
+.arc-dialog-inner input{background:#25252d;border:1px solid #55545b;border-radius:9px;padding:11px 12px;width:100%;min-height:44px}
+.arc-dialog-inner label{font-size:13px;font-weight:700}
+.arc-dialog-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.suggestions{display:flex;flex-direction:column;gap:5px;overflow-y:auto;min-height:0;max-height:300px}
+.suggestion{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;flex-wrap:wrap;background:#272731;font-weight:550}
+.suggestion span:first-child{flex:1;overflow-wrap:anywhere}
+.suggestion .count{flex:none}
+
 @media(max-width:850px){.wrap{grid-template-columns:1fr}.sidebar{max-height:none}.main{padding:16px}header{padding:12px 16px}.brand h1{font-size:19px}.header-right{gap:5px}.header-right button{padding:7px 10px}.draft-status{max-width:92px;font-size:11px}}
 </style>
 </head>
@@ -91,6 +103,23 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     </section>
   </main>
 </div>
+<dialog id="arc-dialog" aria-labelledby="arc-dialog-title">
+  <div class="arc-dialog-inner">
+    <h2 id="arc-dialog-title">Add a new arc</h2>
+    <p class="subtle">Suggested names are taken from episode titles. Choose one to fill in the name, or type your own.</p>
+    <label for="arc-name">Arc name</label>
+    <input id="arc-name" type="text" maxlength="120" autocomplete="off" placeholder="e.g. Cthulhu by Gaslight">
+    <div>
+      <strong>Suggested from your episodes</strong>
+      <p class="subtle">Names with matching parts are grouped together. This only creates an arc, it won't move episodes automatically.</p>
+    </div>
+    <div id="arc-suggestions" class="suggestions" aria-live="polite"></div>
+    <div class="arc-dialog-actions">
+      <button id="arc-cancel" type="button" class="muted">Cancel</button>
+      <button id="arc-create" type="button" class="primary">Create arc</button>
+    </div>
+  </div>
+</dialog>
 <script>
 "use strict";
 (() => {
@@ -323,20 +352,102 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     if (name === collection.name) return;
     backup(); collection.name = name; notify("Renamed to " + name + "."); render(); saveInBrowser();
   }
+  const arcDialog = $("arc-dialog");
+  const arcName = $("arc-name");
+  const arcSuggestions = $("arc-suggestions");
+  let suggestedArcs = [];
+
+  // Strip a source/series suffix and an episode number, while keeping the
+  // original casing and words. "Cthulhu by Gaslight Part 2" becomes
+  // "Cthulhu by Gaslight", and "Part 2 | Omnihedral" works too.
+  function suggestedArcBase(title) {
+    const cleaned = title.trim()
+      .replace(/\s+\|\s+[^|]+$/u, "")
+      .replace(/\s+/gu, " ")
+      .trim();
+    const withoutPart = cleaned.replace(
+      /\s*(?:[-–—:]\s*)?(?:part|pt\.?|episode|ep\.?|chapter|ch\.?|session)\s*(?:#|no\.?\s*)?(?:\d{1,4}|[IVXLCDM]{1,7})(?:\s*(?:of|\/)\s*\d{1,4})?\s*$/iu,
+      ""
+    ).replace(/\s*[-–—:]\s*$/u, "").trim();
+    return {name: withoutPart, numbered: withoutPart !== cleaned};
+  }
+
+  function suggestArcNames() {
+    const assigned = new Set(links().map(p => p.episodeKey));
+    const unassigned = feedEpisodes().filter(e => !assigned.has(e.key));
+    const candidates = unassigned.length ? unassigned : feedEpisodes();
+    const existing = new Set(feedSections().map(c => c.name.trim().toLocaleLowerCase()));
+    const groups = new Map();
+    for (const episode of candidates) {
+      const parsed = suggestedArcBase(episode.title);
+      const name = parsed.name;
+      if (!name || name.length < 4 || name.length > 120 ||
+          existing.has(name.toLocaleLowerCase())) continue;
+      const key = name.toLocaleLowerCase();
+      if (!groups.has(key)) groups.set(key, {name, keys:new Set(), numbered:false});
+      const group = groups.get(key);
+      group.keys.add(episode.key);
+      group.numbered ||= parsed.numbered;
+    }
+    return [...groups.values()]
+      .filter(group => group.keys.size >= 2 || group.numbered)
+      .sort((a,b) => b.keys.size - a.keys.size || a.name.localeCompare(b.name))
+      .map(group => ({name:group.name, count:group.keys.size}));
+  }
+
+  function renderArcSuggestions() {
+    arcSuggestions.replaceChildren();
+    const filter = arcName.value.trim().toLocaleLowerCase();
+    const matches = suggestedArcs.filter(item => item.name.toLocaleLowerCase().includes(filter));
+    matches.slice(0, 30).forEach(item => {
+      const suggestion = button("", () => {
+        arcName.value = item.name;
+        renderArcSuggestions();
+        arcName.focus();
+      }, "suggestion");
+      suggestion.append(el("span", "", item.name));
+      suggestion.append(el("span", "count", item.count + (item.count===1 ? " episode" : " episodes")));
+      suggestion.setAttribute("aria-label", "Use " + item.name + " (" + item.count + " episodes)");
+      arcSuggestions.append(suggestion);
+    });
+    if (!matches.length) {
+      arcSuggestions.append(el("p", "subtle",
+        filter ? "No matching suggestions. You can still create an arc with your own name." :
+          "No repeated or numbered episode titles found. You can type any arc name."));
+    } else if (matches.length > 30) {
+      arcSuggestions.append(el("p", "subtle", "Type part of a name to see more suggestions."));
+    }
+  }
+
   function addArc() {
-    const raw = prompt("New arc name:");
-    if (raw === null || !raw.trim()) return;
-    const name = raw.trim();
+    suggestedArcs = suggestArcNames();
+    arcName.value = "";
+    renderArcSuggestions();
+    arcDialog.showModal();
+    arcName.focus();
+  }
+  function createArc() {
+    const name = arcName.value.trim();
+    if (!name) { arcName.focus(); return; }
     if (name.length > 120) { notify("Arc names must be 120 characters or fewer."); return; }
-    if (feedSections().some(c => c.parentId == null && c.name.toLowerCase() === name.toLowerCase())) {
-      notify("That arc already exists."); return;
+    if (feedSections().some(c => c.parentId == null && c.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      notify("That arc already exists. Choose a different name."); return;
     }
     backup();
     const id = Math.min(0, ...library.collections.map(c => Number(c.id))) - 1;
     const position = Math.max(-1, ...feedSections().filter(c => c.parentId == null).map(c => Number(c.position)||0)) + 1;
     library.collections.push({id, subscriptionId:activeFeed, parentId:null, name, position});
-    activeSection = id; selection.clear(); selectionAnchor = null; notify("Arc added: " + name + "."); render(); saveInBrowser();
+    arcDialog.close();
+    activeSection = id; selection.clear(); selectionAnchor = null;
+    notify("Arc added: " + name + ". You can now move episodes into it.");
+    render(); saveInBrowser();
   }
+  arcName.addEventListener("input", renderArcSuggestions);
+  arcName.addEventListener("keydown", event => {
+    if (event.key === "Enter") { event.preventDefault(); createArc(); }
+  });
+  $("arc-cancel").addEventListener("click", () => arcDialog.close());
+  $("arc-create").addEventListener("click", createArc);
   function pickFeed(feedId) { activeFeed = feedId; activeSection = "all"; selection.clear(); selectionAnchor = null; search = ""; render(); }
   function pickSection(id) { activeSection = id; selection.clear(); selectionAnchor = null; search = ""; render(); }
   function renderSidebar() {
