@@ -56,6 +56,19 @@ dialog::backdrop{background:#05050bc9}
 .suggestion{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;flex-wrap:wrap;background:#272731;font-weight:550}
 .suggestion span:first-child{flex:1;overflow-wrap:anywhere}
 .suggestion .count{flex:none}
+.auto-dialog-inner{padding:22px;display:flex;flex-direction:column;gap:13px;max-height:min(780px,calc(100vh - 40px))}
+.auto-dialog-inner h2{font-size:22px;margin:0}
+.auto-dialog-inner p{margin:0}
+#auto-dialog{width:min(710px,calc(100vw - 24px))}
+.auto-options{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.auto-review-list{display:flex;flex-direction:column;gap:8px;overflow-y:auto;min-height:0;max-height:420px;padding:2px}
+.auto-item{display:flex;gap:11px;align-items:flex-start;padding:12px;background:#272731;border:1px solid var(--line);border-radius:10px;cursor:pointer}
+.auto-item input{width:18px;height:18px;margin-top:4px;accent-color:var(--orange);flex:none}
+.auto-item strong{font-size:14px}
+.auto-item small{display:block;color:var(--muted);font-size:12px;margin-top:3px;overflow-wrap:anywhere}
+.auto-item .hint{color:var(--accent)}
+.auto-dialog-inner .arc-dialog-actions{margin-top:auto}
+
 
 @media(max-width:850px){.wrap{grid-template-columns:1fr}.sidebar{max-height:none}.main{padding:16px}header{padding:12px 16px}.brand h1{font-size:19px}.header-right{gap:5px}.header-right button{padding:7px 10px}.draft-status{max-width:92px;font-size:11px}}
 </style>
@@ -127,6 +140,24 @@ dialog::backdrop{background:#05050bc9}
     <div class="arc-dialog-actions">
       <button id="arc-cancel" type="button" class="muted">Cancel</button>
       <button id="arc-create" type="button" class="primary">Create arc</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="auto-dialog" aria-labelledby="auto-dialog-title">
+  <div class="auto-dialog-inner">
+    <h2 id="auto-dialog-title">Review automatic organisation</h2>
+    <p class="subtle">Find matching story arcs and season groups for this podcast. Review the groups before creating anything. Episodes already assigned to an arc are never moved.</p>
+    <strong id="auto-summary"></strong>
+    <div class="auto-options">
+      <button id="auto-all" type="button">Select all</button>
+      <button id="auto-confident" type="button">Recommended only</button>
+      <button id="auto-none" type="button" class="muted">Select none</button>
+    </div>
+    <div id="auto-list" class="auto-review-list"></div>
+    <p id="auto-count" class="subtle" role="status" aria-live="polite"></p>
+    <div class="arc-dialog-actions">
+      <button id="auto-cancel" type="button" class="muted">Cancel</button>
+      <button id="auto-apply" type="button" class="primary">Organise selected</button>
     </div>
   </div>
 </dialog>
@@ -445,6 +476,186 @@ dialog::backdrop{background:#05050bc9}
       .map(group => ({name:group.name, count:group.keys.size}));
   }
 
+  // Build a proposal from only the unassigned episodes in the current feed.
+  // Existing sections are reused when their name clearly matches. If there
+  // are duplicate section names, skip that group rather than guessing.
+  // One-part new arcs are shown but left unticked by default.
+  function planAutomaticOrganisation() {
+    if (!library || activeFeed == null) return [];
+    const assigned = new Set(links().map(p => p.episodeKey));
+    const existing = feedSections();
+    const groups = new Map();
+    for (const episode of feedEpisodes()) {
+      if (assigned.has(episode.key)) continue;
+      const season = episodeSeason(episode.title);
+      const parsed = season === null ? suggestedArcBase(episode.title) : null;
+      const name = season === null ? parsed.name : "Season " + season;
+      if (!name || name.length > 120 || name.length < 4) continue;
+      // A name with no recognisable part/season suffix is not a reliable
+      // basis for automatically creating a story arc.
+      if (season === null && !parsed.numbered) continue;
+      const key = season === null ? "name:" + name.toLocaleLowerCase() : "season:" + season;
+      if (!groups.has(key)) {
+        groups.set(key, {key, name, season, episodes:[], kind:"new",
+          collectionId:null, recommended:false});
+      }
+      groups.get(key).episodes.push(episode);
+    }
+
+    const plans = [];
+    for (const group of groups.values()) {
+      const matches = existing.filter(c => group.season !== null
+        ? arcSeason(c.name) === group.season
+        : c.name.trim().toLocaleLowerCase() === group.name.toLocaleLowerCase());
+      if (matches.length > 1) continue;
+      if (matches.length === 1) {
+        group.kind = "existing";
+        group.name = matches[0].name;
+        group.collectionId = matches[0].id;
+      }
+      group.recommended = matches.length === 1 || group.episodes.length >= 2;
+      plans.push(group);
+    }
+    return plans.sort((a,b) =>
+      Number(b.recommended) - Number(a.recommended) ||
+      b.episodes.length - a.episodes.length ||
+      a.name.localeCompare(b.name)
+    );
+  }
+
+  const autoDialog = $("auto-dialog");
+  const autoList = $("auto-list");
+  const autoSummary = $("auto-summary");
+  const autoCount = $("auto-count");
+  let autoPlan = [];
+  let autoChecked = new Set();
+
+  function updateAutoSelection() {
+    const selected = autoPlan.filter(group => autoChecked.has(group.key));
+    const episodes = new Set(selected.flatMap(group => group.episodes.map(e => e.key)));
+    const newGroups = selected.filter(group => group.kind === "new").length;
+    autoCount.textContent = selected.length + " groups selected: " +
+      newGroups + " new arcs, " + episodes.size + " unassigned episodes to organise.";
+    $("auto-apply").disabled = selected.length === 0;
+    $("auto-apply").textContent = selected.length
+      ? "Organise " + episodes.size + " episodes"
+      : "Choose groups to organise";
+  }
+
+  function reviewAutomaticOrganisation() {
+    autoPlan = planAutomaticOrganisation();
+    autoChecked = new Set(autoPlan.filter(group => group.recommended).map(group => group.key));
+    autoList.replaceChildren();
+    const available = feedEpisodes().length -
+      new Set(links().map(p => p.episodeKey)).size;
+    autoSummary.textContent = autoPlan.length
+      ? autoPlan.length + " possible groups found among " + available + " unassigned episodes"
+      : "No reliable numbered or season groups found among " + available + " unassigned episodes";
+    for (const group of autoPlan) {
+      const label = el("label", "auto-item");
+      const check = el("input");
+      check.type = "checkbox";
+      check.checked = autoChecked.has(group.key);
+      check.addEventListener("change", () => {
+        if (check.checked) autoChecked.add(group.key);
+        else autoChecked.delete(group.key);
+        updateAutoSelection();
+      });
+      const details = el("span");
+      details.append(el("strong","",group.name));
+      details.append(el("small","",
+        (group.kind === "existing" ? "Add to existing arc" : "Create new arc") +
+        " · " + group.episodes.length +
+        (group.episodes.length === 1 ? " episode" : " episodes")));
+      if (!group.recommended) details.append(el("small","hint",
+        "Only one matching episode. Check this grouping before selecting it."));
+      const samples = group.episodes.slice(0, 3).map(e => e.title);
+      details.append(el("small", "", samples.join(" · ") +
+        (group.episodes.length > 3 ? " · …" : "")));
+      label.append(check,details);
+      autoList.append(label);
+    }
+    if (!autoPlan.length) autoList.append(el("p","subtle",
+      "Try creating an arc manually for episodes that don't share a clear title pattern."));
+    updateAutoSelection();
+    autoDialog.showModal();
+  }
+
+  function applyAutomaticOrganisation() {
+    if (!library || !autoPlan.length) return;
+    const chosen = autoPlan.filter(group => autoChecked.has(group.key));
+    if (!chosen.length) return;
+    // Re-check live assignments at the moment we apply the preview.
+    // There is only one undo step for the entire automatic operation.
+    const assigned = new Set(links().map(p => p.episodeKey));
+    const activeKeys = new Set(feedEpisodes().map(e => e.key));
+    const candidates = chosen.map(group => ({
+      ...group,
+      episodes: group.episodes.filter(e => activeKeys.has(e.key) && !assigned.has(e.key))
+    })).filter(group => group.episodes.length);
+    if (!candidates.length) {
+      autoDialog.close();
+      notify("There are no unassigned episodes left to organise.");
+      return;
+    }
+    backup();
+    let nextId = Math.min(0, ...library.collections.map(c => Number(c.id))) - 1;
+    let nextPosition = Math.max(-1, ...feedSections()
+      .filter(c => c.parentId == null).map(c => Number(c.position) || 0)) + 1;
+    let created = 0, placed = 0, reused = 0;
+    const currentSections = feedSections();
+    for (const group of candidates) {
+      let id = group.collectionId;
+      if (group.kind === "existing") {
+        // Don't write to an arc that was deleted or renamed mid-session.
+        const section = currentSections.find(c =>
+          ident(c.id) === ident(id) && ident(c.subscriptionId) === ident(activeFeed));
+        if (!section) continue;
+        reused++;
+      } else {
+        id = nextId--;
+        library.collections.push({id, subscriptionId:activeFeed,
+          parentId:null, name:group.name, position:nextPosition++});
+        created++;
+      }
+      for (const episode of group.episodes) {
+        if (assigned.has(episode.key)) continue;
+        library.placements.push({
+          subscriptionId:activeFeed, collectionId:id, episodeKey:episode.key
+        });
+        assigned.add(episode.key);
+        placed++;
+      }
+    }
+    autoDialog.close();
+    selection.clear(); selectionAnchor=null;
+    activeSection = "unassigned";
+    notify("Automatically organised " + placed + " episodes into " + created +
+      " new arcs and " + reused + " existing arcs. Existing assignments were preserved. " +
+      "Use Undo if anything needs correcting.");
+    render(); saveInBrowser();
+  }
+
+  $("auto-cancel").addEventListener("click", () => autoDialog.close());
+  $("auto-apply").addEventListener("click", applyAutomaticOrganisation);
+  $("auto-all").addEventListener("click", () => {
+    autoChecked = new Set(autoPlan.map(group => group.key));
+    autoList.querySelectorAll("input[type=checkbox]").forEach(input => {input.checked = true;});
+    updateAutoSelection();
+  });
+  $("auto-none").addEventListener("click", () => {
+    autoChecked.clear();
+    autoList.querySelectorAll("input[type=checkbox]").forEach(input => {input.checked = false;});
+    updateAutoSelection();
+  });
+  $("auto-confident").addEventListener("click", () => {
+    autoChecked = new Set(autoPlan.filter(group => group.recommended).map(group => group.key));
+    autoList.querySelectorAll("input[type=checkbox]").forEach((input,index) => {
+      input.checked = autoChecked.has(autoPlan[index].key);
+    });
+    updateAutoSelection();
+  });
+
   function updateArcMatchPreview() {
     const total = matchingUnassignedEpisodes(arcName.value).length;
     arcPreview.textContent = total
@@ -556,6 +767,7 @@ dialog::backdrop{background:#05050bc9}
     side.append(button("All episodes  (" + feedEpisodes().length + ")", () => pickSection("all"), activeSection==="all"?"active":""));
     const unassigned = feedEpisodes().length - new Set(links().map(p=>p.episodeKey)).size;
     side.append(button("Unassigned  (" + unassigned + ")", () => pickSection("unassigned"), activeSection==="unassigned"?"active":""));
+    side.append(button("Review automatic organisation", reviewAutomaticOrganisation, "primary"));
     const rootSections = feedSections().filter(c => c.parentId == null).sort((a,b) => Number(a.position)-Number(b.position));
     rootSections.forEach(section => {
       const row = el("div", "section-row");
@@ -634,6 +846,7 @@ dialog::backdrop{background:#05050bc9}
         (count === 1 ? "episode" : "episodes"),
         () => fillExistingArc(active), "add-arc-btn"));
     }
+    head.append(button("Auto-organise", reviewAutomaticOrganisation, "add-arc-btn"));
     head.append(button("+ Add arc", addArc, "primary add-arc-btn"));
     main.append(head);
     const toolbar = el("div","toolbar");
