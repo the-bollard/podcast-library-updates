@@ -45,6 +45,25 @@ jobs:
           if (helpers.suggestedArcBase(episodes[0].title).name !== 'Cthulhu by Gaslight') {
             throw Error('Part / source suffix not removed correctly');
           }
+          const gauntlet = [
+            {key:'g1',title:'Space Journalism | Gen Con 2026 Gauntlet Prep Part 1 | Traveller'},
+            {key:'g2',title:'Cooking with Class | Gen Con 2026 Gauntlet Prep Part 2 | Traveller'},
+            {key:'g3',title:'The Bums Lost | Gen Con 2026 Gauntlet Prep Part 4 | Traveller'},
+            {key:'othertraveller',title:'Another Adventure | Different Arc Part 1 | Traveller'}
+          ];
+          if (gauntlet.some((ep,index) =>
+              (index < 3 ? helpers.suggestedArcBase(ep.title).name !== 'Gen Con 2026 Gauntlet Prep'
+                         : helpers.suggestedArcBase(ep.title).name !== 'Different Arc'))) {
+            throw Error('Pipe-delimited arc must be taken from numbered middle segment, not episode title or game system');
+          }
+          const gauntletMatch = new Function('links','feedEpisodes',
+            code.slice(start,end)+'; return matchingUnassignedEpisodes;')(
+            () => [{episodeKey:'g2'}], () => gauntlet
+          );
+          if (gauntletMatch('Gen Con 2026 Gauntlet Prep').map(x=>x.key).join(',') !== 'g1,g3' ||
+              gauntletMatch('Traveller').length !== 0) {
+            throw Error('Gauntlet grouping must ignore Traveller label and existing assignments');
+          }
           const exact = helpers.matchingUnassignedEpisodes('Cthulhu by Gaslight').map(e => e.key);
           if (exact.join(',') !== 'gaslight1,gaslight2') {
             throw Error('Automatic matching must include exact unassigned parts only');
