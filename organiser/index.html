@@ -440,12 +440,23 @@ dialog::backdrop{background:#05050bc9}
       const match = section.match(partSuffix);
       if (!match) continue;
       const name = section.slice(0, match.index).replace(/\s*[-–—:]\s*$/u, "").trim();
-      if (name.length >= 4) return {name, numbered:true};
+      if (name.length >= 4) return {name, numbered:true, bareNumber:null};
     }
-    // No explicit numbered segment? We cannot confidently identify a story
-    // arc, so preserve the original first-segment fallback for manual naming
-    // without allowing the auto-organiser to create a speculative arc.
-    return {name:segments[0] || "", numbered:false};
+    // Some shows use bare numbers: "GURPS 5", "TimeWatch 2", etc.
+    // Consider only 1–99 and require multiple distinct numbered episodes
+    // before proposing an automatically created arc. That prevents a lone
+    // title like "Resident Evil 2" becoming its own arc.
+    const bareSuffix = /(?:\\s+|[-–—]\\s*)(0?[1-9]|[1-9]\\d)\\s*$/u;
+    for (const section of segments) {
+      const match = section.match(bareSuffix);
+      if (!match) continue;
+      const name = section.slice(0, match.index).replace(/\\s*[-–—:]\\s*$/u, "").trim();
+      if (name.length >= 4) {
+        return {name, numbered:true, bareNumber:Number(match[1])};
+      }
+    }
+    // Unnumbered titles aren't sufficient evidence of a new arc.
+    return {name:segments[0] || "", numbered:false, bareNumber:null};
   }
 
   // "S1", "S01", "S1E3", "S01E03", "Season 1" and "Season 01
@@ -498,13 +509,17 @@ dialog::backdrop{background:#05050bc9}
           (season === null && name.length < 4) ||
           existing.has(name.toLocaleLowerCase()) || sameExistingSeason) continue;
       const key = name.toLocaleLowerCase();
-      if (!groups.has(key)) groups.set(key, {name, keys:new Set(), numbered:false});
+      if (!groups.has(key)) groups.set(key, {name, keys:new Set(), numbered:false,
+        bareOnly:true, bareNumbers:new Set()});
       const group = groups.get(key);
       group.keys.add(episode.key);
       group.numbered ||= season !== null || parsed.numbered;
+      if (parsed?.bareNumber != null) group.bareNumbers.add(parsed.bareNumber);
+      else group.bareOnly = false;
     }
     return [...groups.values()]
-      .filter(group => group.keys.size >= 2 || group.numbered)
+      .filter(group => group.bareOnly ? group.bareNumbers.size >= 2 :
+        group.keys.size >= 2 || group.numbered)
       .sort((a,b) => b.keys.size - a.keys.size || a.name.localeCompare(b.name))
       .map(group => ({name:group.name, count:group.keys.size}));
   }
@@ -524,19 +539,25 @@ dialog::backdrop{background:#05050bc9}
       const parsed = season === null ? suggestedArcBase(episode.title) : null;
       const name = season === null ? parsed.name : "Season " + season;
       if (!name || name.length > 120 || name.length < 4) continue;
-      // A name with no recognisable part/season suffix is not a reliable
-      // basis for automatically creating a story arc.
+      // A name with no recognised part, season or bare-number suffix isn't
+      // enough to automatically propose a new story arc.
       if (season === null && !parsed.numbered) continue;
       const key = season === null ? "name:" + name.toLocaleLowerCase() : "season:" + season;
       if (!groups.has(key)) {
         groups.set(key, {key, name, season, episodes:[], kind:"new",
-          collectionId:null, recommended:false});
+          collectionId:null, recommended:false, bareOnly:true, bareNumbers:new Set()});
       }
-      groups.get(key).episodes.push(episode);
+      const group = groups.get(key);
+      group.episodes.push(episode);
+      if (parsed?.bareNumber != null) group.bareNumbers.add(parsed.bareNumber);
+      else group.bareOnly = false;
     }
 
     const plans = [];
     for (const group of groups.values()) {
+      // Only create arcs from bare trailing numbers when at least two
+      // differently numbered episodes share the exact same base title.
+      if (group.bareOnly && group.bareNumbers.size < 2) continue;
       const matches = existing.filter(c => group.season !== null
         ? arcSeason(c.name) === group.season
         : c.name.trim().toLocaleLowerCase() === group.name.toLocaleLowerCase());
