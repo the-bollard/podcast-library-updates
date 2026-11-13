@@ -129,6 +129,47 @@ jobs:
               planned.find(x=>x.name==='Time Without Tide')?.collectionId !== 3) {
             throw Error('Automatic organisation must suggest groups and safely reuse existing arcs');
           }
+          // Some shows number episodes directly: GURPS 1–5, TimeWatch 1–5 etc.
+          const numberedEpisodes = [
+            ...['GURPS','Worlds Without Number','Hunter: The Reckoning','TimeWatch']
+              .flatMap(name=>[1,2,3,4,5].map(n=>({
+                key:name+'-'+n,title:name+' '+n
+              }))),
+            {key:'unrelated',title:'Resident Evil 2'},
+            {key:'year',title:'Gen Con 2026'}
+          ];
+          for (const name of ['GURPS','Worlds Without Number','Hunter: The Reckoning','TimeWatch']) {
+            const parsed = helpers.suggestedArcBase(name+' 5');
+            if (parsed.name !== name || parsed.bareNumber !== 5) {
+              throw Error('Simple numbered title not recognised: '+name);
+            }
+          }
+          if (helpers.suggestedArcBase('Gen Con 2026').bareNumber != null) {
+            throw Error('A year must not count as a bare episode number');
+          }
+          const autoNumbered = new Function('library','activeFeed','feedEpisodes','links','feedSections',
+            'episodeSeason','suggestedArcBase','arcSeason',
+            code.slice(autoStart,autoEnd)+';return planAutomaticOrganisation;')(
+              {format:'podcasts-organiser'},1,()=>numberedEpisodes,()=>[],()=>[],
+              seasonHelpers.episodeSeason,helpers.suggestedArcBase,seasonHelpers.arcSeason
+            )();
+          const expectedNames = ['GURPS','Worlds Without Number','Hunter: The Reckoning','TimeWatch'];
+          if (autoNumbered.length!==4 || !expectedNames.every(name =>
+              autoNumbered.some(group=>group.name===name &&
+                group.episodes.length===5 && group.recommended))) {
+            throw Error('Numbered runs must produce four recommended five-episode arcs');
+          }
+          if (autoNumbered.some(group=>group.name==='Resident Evil')) {
+            throw Error('A single numbered title must not suggest a new arc');
+          }
+          const numberedSuggestions = new Function('links','feedEpisodes','feedSections',
+            code.slice(start,seasonEnd)+';return suggestArcNames;')(
+              ()=>[],()=>numberedEpisodes,()=>[]
+            )();
+          if (!expectedNames.every(name=>numberedSuggestions.some(x=>x.name===name && x.count===5)) ||
+              numberedSuggestions.some(x=>x.name==='Resident Evil')) {
+            throw Error('New-arc suggestions must recognise repeated bare-number sequences');
+          }
           const rangeStart = code.indexOf('function chronologicalEpisodes()', autoEnd);
           const rangeEnd = code.indexOf('function updateArcMatchPreview()', rangeStart);
           if (rangeStart < 0 || rangeEnd < 0) throw Error('Episode range helpers missing');
