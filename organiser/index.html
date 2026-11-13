@@ -25,6 +25,9 @@ header{display:flex;align-items:center;gap:14px;padding:17px max(20px,calc((100v
 .main{padding:20px;min-height:480px}h2{margin:0;font-size:23px}.subtle{color:var(--muted);font-size:14px}.intro{max-width:800px;margin:0 auto;padding:42px 14px}
 .intro h2{font-size:28px;margin-bottom:10px}.intro ol{padding-left:22px;line-height:1.9}
 .file-drop{margin:20px 0;padding:25px;border:2px dashed #6c6261;border-radius:14px;text-align:center;background:#24252c}.file-drop.drag{border-color:var(--orange);background:#332820}
+.resume-card{padding:17px 20px;margin:16px 0;background:#302820;border:1px solid #8b5b37;border-radius:12px}
+.resume-card p{color:var(--muted);margin:6px 0 12px}
+.draft-status{font-size:12px;color:var(--muted);max-width:150px;line-height:1.25}
 .file-drop input{max-width:100%;width:290px}.section-head{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
 .toolbar{display:flex;gap:9px;flex-wrap:wrap;margin:19px 0 12px;align-items:center}
 input[type=search],select{background:#25252d;border:1px solid #55545b;border-radius:9px;padding:10px 12px;min-height:42px}
@@ -37,7 +40,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
 .message{margin:8px 0;padding:9px 12px;border:1px solid var(--line);border-radius:8px;color:var(--muted)}.message strong{color:var(--text)}
 #toast{margin:0 20px 12px;min-height:0;color:#e9c39c}.footer{font-size:12px;color:var(--muted);margin:28px 0 0}
 .count{font-size:12px;color:var(--muted);font-weight:400}.hidden{display:none!important}
-@media(max-width:850px){.wrap{grid-template-columns:1fr}.sidebar{max-height:none}.main{padding:16px}header{padding:12px 16px}.brand h1{font-size:19px}.header-right{gap:5px}.header-right button{padding:7px 10px}}
+@media(max-width:850px){.wrap{grid-template-columns:1fr}.sidebar{max-height:none}.main{padding:16px}header{padding:12px 16px}.brand h1{font-size:19px}.header-right{gap:5px}.header-right button{padding:7px 10px}.draft-status{max-width:92px;font-size:11px}}
 </style>
 </head>
 <body>
@@ -54,7 +57,9 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     <div><h1>Podcasts</h1><small>Library Organiser</small></div>
   </div>
   <div class="header-right">
+    <span id="draft-status" class="draft-status" role="status" aria-live="polite">Checking saved work…</span>
     <button id="undo" disabled title="Undo the last edit">Undo</button>
+    <button id="save-progress" disabled title="Save your edits in this browser">Save progress</button>
     <button id="save" class="primary" disabled>Download changes</button>
   </div>
 </header>
@@ -72,12 +77,17 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
         <li>Open that JSON file here, then organise as many episodes as you like.</li>
         <li>Choose <strong>Download changes</strong> and import the new JSON through <strong>Settings → Import edited organisation</strong>.</li>
       </ol>
+      <div class="resume-card hidden" id="resume-box">
+        <strong>Saved work found in this browser</strong>
+        <p id="resume-info"></p>
+        <button id="resume-draft" class="primary">Resume saved work</button>
+      </div>
       <div class="file-drop" id="drop">
         <label for="file">Open your exported Podcasts JSON</label><br><br>
         <input id="file" type="file" accept=".json,application/json">
         <p class="subtle">You can also drag and drop the file here.</p>
       </div>
-      <p class="footer">Private by design: this page runs entirely in your browser. It makes no network requests and never asks for RSS passwords or Patreon links. Your files are not uploaded to GitHub.</p>
+      <p class="footer">Your work is saved locally in this browser, not uploaded to GitHub. Use the same browser and device to resume. Clearing site data or using private browsing can remove the saved draft. Download a finished JSON when you want to import changes into Podcasts on your phone.</p>
     </section>
   </main>
 </div>
@@ -88,6 +98,141 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
   let library = null, activeFeed = null, activeSection = "all", selection = new Set(), search = "", history = [];
   let selectionAnchor = null;
   const MAX_RENDER = 400;
+
+  // IndexedDB stores the whole exported library locally. Unlike localStorage,
+  // it can hold large libraries without running into the usual 5 MB limit.
+  // No data is sent anywhere and no web account is needed.
+  const welcome = $("main").firstElementChild;
+  const resumeBox = $("resume-box");
+  const resumeInfo = $("resume-info");
+  let savedWork = null;
+  let writeQueue = Promise.resolve();
+  const draftDb = new Promise((resolve, reject) => {
+    if (!("indexedDB" in window)) {
+      reject(Error("Browser storage is unavailable"));
+      return;
+    }
+    const request = indexedDB.open("podcasts-organiser-local-draft", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("drafts");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || Error("Can't open browser storage"));
+    request.onblocked = () => reject(Error("Browser storage is blocked by another tab"));
+  }).catch(() => null);
+  function draftOperation(mode, action) {
+    return draftDb.then(db => {
+      if (!db) throw Error("Browser storage isn't available");
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction("drafts", mode);
+        const request = action(transaction.objectStore("drafts"));
+        transaction.oncomplete = () => resolve(request.result);
+        transaction.onerror = () => reject(transaction.error || Error("Browser storage failed"));
+        transaction.onabort = () => reject(transaction.error || Error("Browser storage failed"));
+      });
+    });
+  }
+  const readDraft = () => draftOperation("readonly", store => store.get("current"));
+  const removeDraft = () => draftOperation("readwrite", store => store.delete("current"));
+  function showSavedWork(saved) {
+    savedWork = saved;
+    if (!saved?.library) {
+      resumeBox.classList.add("hidden");
+      return;
+    }
+    resumeBox.classList.remove("hidden");
+    const date = new Date(saved.savedAt);
+    const time = Number.isNaN(date.getTime()) ? "previously" :
+      new Intl.DateTimeFormat("en-GB", {dateStyle:"medium",timeStyle:"short"}).format(date);
+    resumeInfo.textContent = "Last saved " + time + " · " +
+      saved.library.subscriptions.length + " podcasts, " +
+      saved.library.episodes.length + " episodes. Your arc changes are ready to continue.";
+  }
+  function saveInBrowser(manual = false) {
+    if (!library) return Promise.resolve();
+    // Clone now so rapid edits cannot modify a snapshot that is being written.
+    const snapshot = {
+      library: structuredClone(library),
+      feed: activeFeed,
+      section: activeSection,
+      savedAt: Date.now()
+    };
+    $("draft-status").textContent = "Saving…";
+    writeQueue = writeQueue.catch(() => {}).then(() =>
+      draftOperation("readwrite", store => store.put(snapshot, "current"))
+    ).then(() => {
+      showSavedWork(snapshot);
+      $("draft-status").textContent = "Saved in browser";
+      if (manual) notify("Progress saved in this browser. You can close this tab and resume later.");
+    }).catch(() => {
+      $("draft-status").textContent = "Not saved";
+      notify("Browser storage couldn't save your progress. Download a JSON backup before closing this tab.");
+    });
+    return writeQueue;
+  }
+  function loadIntoEditor(data, message, previousLocation = null) {
+    library = validate(data);
+    activeFeed = library.subscriptions[0]?.id ?? null;
+    activeSection = "all";
+    if (previousLocation && library.subscriptions.some(feed => ident(feed.id) === ident(previousLocation.feed))) {
+      activeFeed = previousLocation.feed;
+      if (previousLocation.section === "all" || previousLocation.section === "unassigned" ||
+          library.collections.some(c => ident(c.id) === ident(previousLocation.section))) {
+        activeSection = previousLocation.section;
+      }
+    }
+    selection.clear(); selectionAnchor = null; history = []; search = "";
+    $("undo").disabled = true;
+    $("save").disabled = false;
+    $("save-progress").disabled = false;
+    notify(message);
+    render();
+  }
+  $("save-progress").addEventListener("click", () => saveInBrowser(true));
+  $("resume-draft").addEventListener("click", () => {
+    if (!savedWork?.library) return;
+    try {
+      loadIntoEditor(structuredClone(savedWork.library),
+        "Resumed your saved work. Edits will keep saving automatically in this browser.",
+        savedWork);
+      $("draft-status").textContent = "Saved in browser";
+    } catch(e) { notify(e.message || "Couldn't resume this saved draft."); }
+  });
+  async function initialiseSavedWork() {
+    try {
+      const existing = await readDraft();
+      showSavedWork(existing);
+      $("draft-status").textContent = existing?.library ? "Draft found" : "Autosave ready";
+    } catch (_) {
+      $("draft-status").textContent = "Autosave unavailable";
+      notify("This browser isn't allowing local saves. Download JSON backups while editing.");
+    }
+  }
+  initialiseSavedWork();
+
+  function showWelcome() {
+    $("main").replaceChildren(welcome);
+    if (savedWork?.library) showSavedWork(savedWork);
+  }
+  async function clearSavedWork() {
+    if (!confirm("Delete the saved organiser draft from this browser? This does not change Podcasts on your phone. Download a JSON backup first if you want to keep these edits.")) return;
+    await writeQueue;
+    try {
+      await removeDraft();
+      savedWork = null;
+      library = null; activeFeed = null; activeSection = "all"; history = [];
+      selection.clear(); selectionAnchor = null; search = "";
+      $("undo").disabled = true;
+      $("save").disabled = true;
+      $("save-progress").disabled = true;
+      resumeBox.classList.add("hidden");
+      $("draft-status").textContent = "Autosave ready";
+      $("side").replaceChildren(el("h2", "", "Your library"),
+        el("p", "subtle", "Open a Podcasts export to get started."));
+      showWelcome();
+      notify("Saved work cleared from this browser.");
+    } catch (_) {
+      notify("Couldn't clear saved work. Your existing draft is still available.");
+    }
+  }
   const el = (tag, cls, text) => {
     const node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -142,11 +287,10 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     if (file.size > 15 * 1024 * 1024) { notify("File too large. Export a fresh JSON from the app."); return; }
     try {
       const data = validate(JSON.parse(await file.text()));
-      library = data; activeFeed = data.subscriptions[0]?.id ?? null; activeSection = "all";
-      selection.clear(); selectionAnchor = null; history = []; search = "";
-      $("undo").disabled = true; $("save").disabled = false;
-      notify("Loaded " + data.subscriptions.length + " podcasts and " + data.episodes.length + " episode titles. Edits stay on this device until you download a JSON.");
-      render();
+      if (library && !confirm("Open a different export? This will replace your current browser draft. Download changes first if you want a backup.")) return;
+      loadIntoEditor(data, "Loaded " + data.subscriptions.length + " podcasts and " +
+        data.episodes.length + " episode titles. Your work will be saved in this browser.");
+      saveInBrowser();
     } catch (e) { notify(e.message || "Couldn't read that file."); }
   }
   $("file").addEventListener("change", e => openFile(e.target.files[0]));
@@ -159,7 +303,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     if (!previous) return;
     library.collections = previous.collections; library.placements = previous.placements;
     selection.clear(); selectionAnchor = null; $("undo").disabled = history.length === 0;
-    notify("Last edit undone."); render();
+    notify("Last edit undone."); render(); saveInBrowser();
   });
   $("save").addEventListener("click", () => {
     if (!library) return;
@@ -177,7 +321,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     const name = revised.trim();
     if (name.length > 120) { notify("Arc names must be 120 characters or fewer."); return; }
     if (name === collection.name) return;
-    backup(); collection.name = name; notify("Renamed to " + name + "."); render();
+    backup(); collection.name = name; notify("Renamed to " + name + "."); render(); saveInBrowser();
   }
   function addArc() {
     const raw = prompt("New arc name:");
@@ -191,7 +335,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     const id = Math.min(0, ...library.collections.map(c => Number(c.id))) - 1;
     const position = Math.max(-1, ...feedSections().filter(c => c.parentId == null).map(c => Number(c.position)||0)) + 1;
     library.collections.push({id, subscriptionId:activeFeed, parentId:null, name, position});
-    activeSection = id; selection.clear(); selectionAnchor = null; notify("Arc added: " + name + "."); render();
+    activeSection = id; selection.clear(); selectionAnchor = null; notify("Arc added: " + name + "."); render(); saveInBrowser();
   }
   function pickFeed(feedId) { activeFeed = feedId; activeSection = "all"; selection.clear(); selectionAnchor = null; search = ""; render(); }
   function pickSection(id) { activeSection = id; selection.clear(); selectionAnchor = null; search = ""; render(); }
@@ -221,6 +365,8 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     const actions = el("div"); actions.style.marginTop = "16px";
     actions.append(button("+ New arc", addArc, "primary")); side.append(actions);
     side.append(el("p","footer","Season folders stay attached to their parent arc. You can assign episodes directly to the arc."));
+    side.append(button("Open a different JSON", showWelcome, "muted"));
+    side.append(button("Clear saved browser draft", clearSavedWork, "muted"));
   }
   const fmt = stamp => {
     if (stamp == null || !Number.isFinite(Number(stamp))) return "";
@@ -266,7 +412,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     }
     const edited = chosen.size;
     selection.clear(); selectionAnchor = null; notify(edited + " episodes updated. " + Math.abs(library.placements.length-before) + " assignment links changed.");
-    render();
+    render(); saveInBrowser();
   }
   function renderMain() {
     const main = $("main"); main.replaceChildren();
@@ -279,7 +425,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     const head = el("div","section-head");
     const heading = el("div");
     heading.append(el("h2","",title));
-    heading.append(el("p","subtle","Tick episodes or hold Shift and click another to select a whole range, then move or add them to an arc. Changes stay in this browser until download."));
+    heading.append(el("p","subtle","Tick episodes or hold Shift and click another to select a whole range. Arc changes save automatically in this browser. Download JSON only when you're ready to import into Podcasts."));
     head.append(heading); main.append(head);
     const toolbar = el("div","toolbar");
     const find = el("input"); find.type="search"; find.placeholder="Search episode titles"; find.setAttribute("aria-label","Search episodes");
@@ -354,7 +500,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     });
     main.append(list);
     if(!current.length) main.append(el("p","message","No matching episodes here. Try All episodes or change the search."));
-    main.append(el("p","footer","No website accounts, no upload and no live syncing. The edited JSON changes only collections and episode assignments when imported into Podcasts."));
+    main.append(el("p","footer","Your draft is stored only in this browser, not synced between computers. Clearing site data removes it. When finished, download the JSON and import it into Podcasts on your phone."));
   }
   function render() { renderSidebar(); renderMain(); }
 })();
