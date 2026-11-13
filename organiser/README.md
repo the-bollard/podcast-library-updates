@@ -12,6 +12,14 @@ A standalone, client-side editor for the **Podcasts** Android app.
 
 GitHub Pages can then serve the website from the existing `organiser/index.html`. The site contains no private podcast data. Please don't commit your exported JSON files to this public repository.
 
+## Save work and come back later
+
+The website automatically saves your working library to **IndexedDB in your current browser** whenever you rename an arc, create an arc, move episodes or undo a change. It also has an explicit **Save progress** button. On your next visit using the same browser and device, choose **Resume saved work** instead of exporting a new JSON file.
+
+The sidebar has **Open a different JSON** and **Clear saved browser draft** controls. Clearing the saved draft doesn't affect any podcast data on your phone.
+
+Local browser storage is not a cloud account or sync service. Private browsing and clearing site data can remove your draft. Keep an exported or downloaded JSON as a backup for important edits, and download the finished JSON only when ready to import into Podcasts on your phone.
+
 ## One-time editing workflow
 
 1. Update the Android app to **Podcasts 0.5.7** or newer.
