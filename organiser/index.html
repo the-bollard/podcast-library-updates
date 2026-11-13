@@ -16,7 +16,10 @@ header{display:flex;align-items:center;gap:14px;padding:17px max(20px,calc((100v
 .logo{height:50px;width:50px;display:block;border-radius:12px;background:#20212a;padding:5px}.header-right{margin-left:auto;display:flex;gap:8px;align-items:center}
 .wrap{max-width:1440px;margin:auto;padding:18px;display:grid;grid-template-columns:290px minmax(0,1fr);gap:16px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;min-width:0}.sidebar{padding:14px;max-height:calc(100vh - 122px);overflow:auto}
-.sidebar h2{margin:0 0 12px;font-size:16px}h3{font-size:14px;margin:18px 0 7px;color:var(--muted);font-weight:700}
+.sidebar h2{margin:0;font-size:16px}
+.sidebar-tools{display:flex;align-items:center;justify-content:space-between;gap:8px;position:sticky;top:-14px;padding:12px 0;margin:-12px 0 12px;background:var(--panel);z-index:2;border-bottom:1px solid var(--line)}
+.sidebar .sidebar-tools button{display:inline-block;width:auto;text-align:center;flex:none;padding:7px 10px}
+.section-head .add-arc-btn{flex:none;align-self:flex-start}h3{font-size:14px;margin:18px 0 7px;color:var(--muted);font-weight:700}
 .sidebar button{display:block;text-align:left;width:100%;background:transparent;border:1px solid transparent;padding:9px 10px;font-weight:550}
 .sidebar button.active{background:#3b312a;color:var(--accent);border-color:#785139}
 .section-row{display:flex;gap:4px;align-items:center}.section-row .edit{width:auto;padding:8px;background:transparent;color:var(--muted);font-size:12px}
@@ -451,7 +454,11 @@ dialog::backdrop{background:#05050bc9}
   function pickFeed(feedId) { activeFeed = feedId; activeSection = "all"; selection.clear(); selectionAnchor = null; search = ""; render(); }
   function pickSection(id) { activeSection = id; selection.clear(); selectionAnchor = null; search = ""; render(); }
   function renderSidebar() {
-    const side = $("side"); side.replaceChildren(el("h2", "", "Your library"));
+    const side = $("side"); side.replaceChildren();
+    const tools = el("div", "sidebar-tools");
+    tools.append(el("h2", "", "Your library"));
+    if (library && activeFeed != null) tools.append(button("+ Add arc", addArc, "primary"));
+    side.append(tools);
     if (!library) return;
     const podcasts = library.subscriptions.slice().sort((a,b) => a.title.localeCompare(b.title));
     for (const feed of podcasts) {
@@ -473,8 +480,6 @@ dialog::backdrop{background:#05050bc9}
       ren.setAttribute("aria-label", "Rename " + section.name);
       put(row,b,ren); side.append(row);
     });
-    const actions = el("div"); actions.style.marginTop = "16px";
-    actions.append(button("+ New arc", addArc, "primary")); side.append(actions);
     side.append(el("p","footer","Season folders stay attached to their parent arc. You can assign episodes directly to the arc."));
     side.append(button("Open a different JSON", showWelcome, "muted"));
     side.append(button("Clear saved browser draft", clearSavedWork, "muted"));
@@ -537,7 +542,9 @@ dialog::backdrop{background:#05050bc9}
     const heading = el("div");
     heading.append(el("h2","",title));
     heading.append(el("p","subtle","Tick episodes or hold Shift and click another to select a whole range. Arc changes save automatically in this browser. Download JSON only when you're ready to import into Podcasts."));
-    head.append(heading); main.append(head);
+    head.append(heading);
+    head.append(button("+ Add arc", addArc, "primary add-arc-btn"));
+    main.append(head);
     const toolbar = el("div","toolbar");
     const find = el("input"); find.type="search"; find.placeholder="Search episode titles"; find.setAttribute("aria-label","Search episodes");
     find.value = search;
