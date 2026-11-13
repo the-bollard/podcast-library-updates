@@ -55,5 +55,37 @@ jobs:
           if (helpers.matchingUnassignedEpisodes('Time Without Tide').length !== 1) {
             throw Error('Single part matching failed');
           }
-          console.log('Organiser JavaScript, privacy and arc auto-fill checks passed');
+          const seasonEpisodes = [
+            {key:'s1a', title:'S1E01 - The Beginning'},
+            {key:'s1b', title:'S01E03: A New Clue'},
+            {key:'s1c', title:'Season 1 Episode 4 - Finale'},
+            {key:'s1d', title:'S1 - Season 1'},
+            {key:'s2a', title:'S2E01 - Next Chapter'},
+            {key:'s10', title:'S10E01 - Much Later'},
+            {key:'s1placed', title:'Season 1 Episode 5'},
+            {key:'noise', title:'Christmas1 Countdown'}
+          ];
+          const seasonEnd = code.indexOf('function updateArcMatchPreview()', start);
+          const seasonHelpers = new Function('links', 'feedEpisodes', 'feedSections',
+            code.slice(start, seasonEnd) +
+            '; return {episodeSeason,arcSeason,matchingUnassignedEpisodes,suggestArcNames};')(
+              () => [{episodeKey:'s1placed'}], () => seasonEpisodes, () => []
+            );
+          const one = seasonHelpers.matchingUnassignedEpisodes('Season 1').map(e=>e.key).join(',');
+          if (one !== 's1a,s1b,s1c,s1d') throw Error('S1/Season 1 matching is incorrect: '+one);
+          if (seasonHelpers.matchingUnassignedEpisodes('S01').length !== 4) {
+            throw Error('S01 alias must match Season 1');
+          }
+          if (seasonHelpers.matchingUnassignedEpisodes('Season 2').map(e=>e.key).join(',') !== 's2a') {
+            throw Error('Other seasons must not be mixed');
+          }
+          if (seasonHelpers.episodeSeason('S10E01') !== 10 ||
+              seasonHelpers.episodeSeason('Christmas1 Countdown') !== null) {
+            throw Error('Season number boundary is incorrect');
+          }
+          const suggested = seasonHelpers.suggestArcNames();
+          if (suggested.find(x=>x.name==='Season 1')?.count !== 4) {
+            throw Error('Season 1 suggestion must count only unassigned matching episodes');
+          }
+          console.log('Organiser JavaScript, privacy, named arc and S1/Season 1 auto-fill checks passed');
           NODE
