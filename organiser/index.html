@@ -86,6 +86,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
 (() => {
   const $ = id => document.getElementById(id);
   let library = null, activeFeed = null, activeSection = "all", selection = new Set(), search = "", history = [];
+  let selectionAnchor = null;
   const MAX_RENDER = 400;
   const el = (tag, cls, text) => {
     const node = document.createElement(tag);
@@ -142,7 +143,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     try {
       const data = validate(JSON.parse(await file.text()));
       library = data; activeFeed = data.subscriptions[0]?.id ?? null; activeSection = "all";
-      selection.clear(); history = []; search = "";
+      selection.clear(); selectionAnchor = null; history = []; search = "";
       $("undo").disabled = true; $("save").disabled = false;
       notify("Loaded " + data.subscriptions.length + " podcasts and " + data.episodes.length + " episode titles. Edits stay on this device until you download a JSON.");
       render();
@@ -157,7 +158,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     const previous = history.pop();
     if (!previous) return;
     library.collections = previous.collections; library.placements = previous.placements;
-    selection.clear(); $("undo").disabled = history.length === 0;
+    selection.clear(); selectionAnchor = null; $("undo").disabled = history.length === 0;
     notify("Last edit undone."); render();
   });
   $("save").addEventListener("click", () => {
@@ -190,10 +191,10 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     const id = Math.min(0, ...library.collections.map(c => Number(c.id))) - 1;
     const position = Math.max(-1, ...feedSections().filter(c => c.parentId == null).map(c => Number(c.position)||0)) + 1;
     library.collections.push({id, subscriptionId:activeFeed, parentId:null, name, position});
-    activeSection = id; selection.clear(); notify("Arc added: " + name + "."); render();
+    activeSection = id; selection.clear(); selectionAnchor = null; notify("Arc added: " + name + "."); render();
   }
-  function pickFeed(feedId) { activeFeed = feedId; activeSection = "all"; selection.clear(); search = ""; render(); }
-  function pickSection(id) { activeSection = id; selection.clear(); search = ""; render(); }
+  function pickFeed(feedId) { activeFeed = feedId; activeSection = "all"; selection.clear(); selectionAnchor = null; search = ""; render(); }
+  function pickSection(id) { activeSection = id; selection.clear(); selectionAnchor = null; search = ""; render(); }
   function renderSidebar() {
     const side = $("side"); side.replaceChildren(el("h2", "", "Your library"));
     if (!library) return;
@@ -264,7 +265,7 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
       }
     }
     const edited = chosen.size;
-    selection.clear(); notify(edited + " episodes updated. " + Math.abs(library.placements.length-before) + " assignment links changed.");
+    selection.clear(); selectionAnchor = null; notify(edited + " episodes updated. " + Math.abs(library.placements.length-before) + " assignment links changed.");
     render();
   }
   function renderMain() {
@@ -278,16 +279,16 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     const head = el("div","section-head");
     const heading = el("div");
     heading.append(el("h2","",title));
-    heading.append(el("p","subtle","Tick several episodes, then move or add them to an arc. Changes stay in this browser until download."));
+    heading.append(el("p","subtle","Tick episodes or hold Shift and click another to select a whole range, then move or add them to an arc. Changes stay in this browser until download."));
     head.append(heading); main.append(head);
     const toolbar = el("div","toolbar");
     const find = el("input"); find.type="search"; find.placeholder="Search episode titles"; find.setAttribute("aria-label","Search episodes");
     find.value = search;
-    find.addEventListener("input",() => {search=find.value; selection.clear(); renderMain(); const restored=$("search-episodes");restored.focus();restored.setSelectionRange(search.length,search.length);});
+    find.addEventListener("input",() => {search=find.value; selection.clear(); selectionAnchor = null; renderMain(); const restored=$("search-episodes");restored.focus();restored.setSelectionRange(search.length,search.length);});
     find.id="search-episodes";
     toolbar.append(find);
-    toolbar.append(button("Select all matching", () => { visibleEpisodes().forEach(e=>selection.add(e.key)); renderMain(); }));
-    toolbar.append(button("Clear selection", () => { selection.clear(); renderMain(); }, "muted"));
+    toolbar.append(button("Select all matching", () => { visibleEpisodes().forEach(e=>selection.add(e.key)); selectionAnchor = null; renderMain(); }));
+    toolbar.append(button("Clear selection", () => { selection.clear(); selectionAnchor = null; renderMain(); }, "muted"));
     main.append(toolbar);
 
     const bulkbar = el("div","bulk");
@@ -309,12 +310,37 @@ input[type=search]{flex:1 1 220px;min-width:160px}.bulk{display:flex;align-items
     const list = el("ul","episode-list"); list.setAttribute("aria-label","Episodes");
     const byId = new Map(sections.map(c=>[ident(c.id),c]));
     const currentMembership = membership();
+    const visibleCheckboxes = new Map();
     current.slice(0,MAX_RENDER).forEach(episode => {
       const li=el("li");
       const label=el("label","item");
       const cb=el("input"); cb.type="checkbox"; cb.checked=selection.has(episode.key);
+      visibleCheckboxes.set(episode.key, cb);
+      // Clicking either the checkbox or its label retains the Shift modifier.
+      // The last clicked episode is the anchor for the next range.
+      let shiftClick = false;
+      label.addEventListener("click",event => {
+        if(event.target !== cb) shiftClick = event.shiftKey;
+      });
+      cb.addEventListener("click",event => {
+        shiftClick = shiftClick || event.shiftKey;
+      });
       cb.addEventListener("change",()=>{
-        if(cb.checked) selection.add(episode.key); else selection.delete(episode.key);
+        const anchorIndex = current.findIndex(item => item.key === selectionAnchor);
+        const clickedIndex = current.findIndex(item => item.key === episode.key);
+        if (shiftClick && anchorIndex !== -1 && clickedIndex !== -1) {
+          const from = Math.min(anchorIndex, clickedIndex);
+          const to = Math.max(anchorIndex, clickedIndex);
+          for (let i = from; i <= to; i++) {
+            if (cb.checked) selection.add(current[i].key);
+            else selection.delete(current[i].key);
+          }
+        } else {
+          if (cb.checked) selection.add(episode.key); else selection.delete(episode.key);
+        }
+        selectionAnchor = episode.key;
+        shiftClick = false;
+        visibleCheckboxes.forEach((box,key)=>{ box.checked=selection.has(key); });
         counter.textContent=selection.size+" selected";
       });
       const info=el("div");
