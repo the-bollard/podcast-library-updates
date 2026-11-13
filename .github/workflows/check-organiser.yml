@@ -65,7 +65,8 @@ jobs:
             {key:'s1placed', title:'Season 1 Episode 5'},
             {key:'noise', title:'Christmas1 Countdown'}
           ];
-          const seasonEnd = code.indexOf('function updateArcMatchPreview()', start);
+          // Keep the extracted helpers free of UI initialisation and dialog handlers.
+          const seasonEnd = code.indexOf('function planAutomaticOrganisation()', start);
           const seasonHelpers = new Function('links', 'feedEpisodes', 'feedSections',
             code.slice(start, seasonEnd) +
             '; return {episodeSeason,arcSeason,matchingUnassignedEpisodes,suggestArcNames};')(
@@ -87,5 +88,48 @@ jobs:
           if (suggested.find(x=>x.name==='Season 1')?.count !== 4) {
             throw Error('Season 1 suggestion must count only unassigned matching episodes');
           }
-          console.log('Organiser JavaScript, privacy, named arc and S1/Season 1 auto-fill checks passed');
+          const autoStart = code.indexOf('function planAutomaticOrganisation()', seasonEnd);
+          const autoEnd = code.indexOf('const autoDialog =', autoStart);
+          if (autoStart < 0 || autoEnd < 0) throw Error('Automatic organiser helper missing');
+          const getPlan = new Function('library','activeFeed','feedEpisodes','links','feedSections',
+            'episodeSeason','suggestedArcBase','arcSeason',
+            code.slice(autoStart, autoEnd) + ';return planAutomaticOrganisation;')(
+              {format:'podcasts-organiser'}, 1, () => [
+                {key:'gas1',title:'Cthulhu by Gaslight Part 1'},
+                {key:'gas2',title:'Cthulhu by Gaslight Part 2'},
+                {key:'solo',title:'Time Without Tide Part 1'},
+                {key:'placed',title:'Cthulhu by Gaslight Part 3'}
+              ], () => [{episodeKey:'placed'}], () => [
+                {id:3,name:'Time Without Tide',subscriptionId:1}
+              ],
+              seasonHelpers.episodeSeason, helpers.suggestedArcBase,seasonHelpers.arcSeason
+            );
+          const planned = getPlan();
+          if (planned.find(x=>x.name==='Cthulhu by Gaslight')?.episodes.length !== 2 ||
+              !planned.find(x=>x.name==='Cthulhu by Gaslight')?.recommended ||
+              planned.find(x=>x.name==='Time Without Tide')?.collectionId !== 3) {
+            throw Error('Automatic organisation must suggest groups and safely reuse existing arcs');
+          }
+          const rangeStart = code.indexOf('function chronologicalEpisodes()', autoEnd);
+          const rangeEnd = code.indexOf('function updateArcMatchPreview()', rangeStart);
+          if (rangeStart < 0 || rangeEnd < 0) throw Error('Episode range helpers missing');
+          const fullEpisodes = [
+            {key:'third',title:'Third episode',published:300},
+            {key:'first',title:'First episode',published:100},
+            {key:'fourth',title:'Fourth episode',published:400},
+            {key:'second',title:'Second episode',published:200}
+          ];
+          const ranges = new Function('feedEpisodes','links',
+            code.slice(rangeStart,rangeEnd)+';return {episodeRange,episodeRangeSummary};')(
+              ()=>fullEpisodes, ()=>[{episodeKey:'second'}]
+            );
+          const subset = ranges.episodeRange('2-3');
+          if (subset.start!==2 || subset.end!==3 || subset.skipped!==1 ||
+              subset.episodes.map(e=>e.key).join(',')!=='third') {
+            throw Error('Episode range must be chronological and leave existing assignments alone');
+          }
+          if (!ranges.episodeRange('3-2').error || !ranges.episodeRange('1-10').error) {
+            throw Error('Invalid ranges must be rejected');
+          }
+          console.log('Organiser JavaScript, privacy, auto-groups, seasons and episode ranges passed');
           NODE
