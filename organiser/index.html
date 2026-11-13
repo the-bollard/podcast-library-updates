@@ -47,7 +47,10 @@ dialog{color:var(--text);background:var(--panel);border:1px solid var(--line);bo
 dialog::backdrop{background:#05050bc9}
 .arc-dialog-inner{padding:22px;display:flex;flex-direction:column;gap:13px;max-height:calc(100vh - 45px)}
 .arc-dialog-inner h2{font-size:22px;margin:0}.arc-dialog-inner p{margin:0}
-.arc-dialog-inner input[type=text]{background:#25252d;border:1px solid #55545b;border-radius:9px;padding:11px 12px;width:100%;min-height:44px}
+.arc-dialog-inner input[type=text],.range-dialog-inner input[type=text]{background:#25252d;border:1px solid #55545b;border-radius:9px;padding:11px 12px;width:100%;min-height:44px}
+.range-dialog-inner{padding:22px;display:flex;flex-direction:column;gap:13px}
+.range-dialog-inner label{font-size:13px;font-weight:700}
+.range-dialog-inner h2{font-size:22px;margin:0}
 .arc-dialog-inner label{font-size:13px;font-weight:700}
 .arc-dialog-inner .arc-autofill-option{display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:500}
 .arc-autofill-option input[type=checkbox]{width:18px;height:18px;flex:none;accent-color:var(--orange)}
@@ -127,6 +130,9 @@ dialog::backdrop{background:#05050bc9}
     <p class="subtle">Pick a suggested name or type your own. Matching unassigned episodes can be added automatically when you create the arc.</p>
     <label for="arc-name">Arc name</label>
     <input id="arc-name" type="text" maxlength="120" autocomplete="off" placeholder="e.g. Cthulhu by Gaslight">
+    <label for="arc-range">Episode number range (optional)</label>
+    <input id="arc-range" type="text" inputmode="text" maxlength="20" autocomplete="off" placeholder="e.g. 6-23">
+    <p class="subtle">Counts the podcast's episodes from oldest to newest, starting at 1. Entering a range overrides title matching. Check the preview, especially if episodes have missing dates.</p>
     <label class="arc-autofill-option" for="arc-autofill">
       <input id="arc-autofill" type="checkbox" checked>
       <span>Automatically add matching unassigned episodes</span>
@@ -158,6 +164,19 @@ dialog::backdrop{background:#05050bc9}
     <div class="arc-dialog-actions">
       <button id="auto-cancel" type="button" class="muted">Cancel</button>
       <button id="auto-apply" type="button" class="primary">Organise selected</button>
+    </div>
+  </div>
+</dialog>
+<dialog id="range-dialog" aria-labelledby="range-title">
+  <div class="range-dialog-inner">
+    <h2 id="range-title">Add episode range</h2>
+    <p class="subtle">Choose episode positions counting from the oldest published episode as number 1. Already assigned episodes won't be moved.</p>
+    <label for="range-value">Episode numbers</label>
+    <input id="range-value" type="text" maxlength="20" placeholder="e.g. 6-23" autocomplete="off">
+    <p id="range-preview" class="subtle" role="status" aria-live="polite">Enter a range to preview the episodes.</p>
+    <div class="arc-dialog-actions">
+      <button id="range-cancel" class="muted" type="button">Cancel</button>
+      <button id="range-apply" class="primary" type="button" disabled>Add episodes</button>
     </div>
   </div>
 </dialog>
@@ -401,6 +420,7 @@ dialog::backdrop{background:#05050bc9}
   }
   const arcDialog = $("arc-dialog");
   const arcName = $("arc-name");
+  const arcRange = $("arc-range");
   const arcAutofill = $("arc-autofill");
   const arcPreview = $("arc-match-preview");
   const arcSuggestions = $("arc-suggestions");
@@ -662,12 +682,58 @@ dialog::backdrop{background:#05050bc9}
     updateAutoSelection();
   });
 
+  // An episode number here is the position in the chronological feed,
+  // not a "Part" number in an episode's title. The entire feed is sorted
+  // first, so already-assigned episodes still occupy their original positions.
+  function chronologicalEpisodes() {
+    return feedEpisodes().slice().sort((a,b) => {
+      const dateA = a.published == null ? Number.POSITIVE_INFINITY : Number(a.published);
+      const dateB = b.published == null ? Number.POSITIVE_INFINITY : Number(b.published);
+      return dateA - dateB || a.key.localeCompare(b.key);
+    });
+  }
+
+  function episodeRange(raw) {
+    const source = raw.trim();
+    if (!source) return null;
+    const match = source.match(/^(\d{1,6})\s*[-–]\s*(\d{1,6})$/u);
+    if (!match) return {error:"Enter two episode numbers, for example 6-23."};
+    const start = Number(match[1]), end = Number(match[2]);
+    const all = chronologicalEpisodes();
+    if (start < 1 || end < start || end > all.length) {
+      return {error:"Choose a range between 1 and " + all.length +
+        ", with the first number no greater than the second."};
+    }
+    const window = all.slice(start-1,end);
+    const assigned = new Set(links().map(p=>p.episodeKey));
+    const unassigned = window.filter(ep=>!assigned.has(ep.key));
+    return {start,end,total:window.length,episodes:unassigned,
+      skipped:window.length-unassigned.length,
+      first:window[0].title,last:window[window.length-1].title};
+  }
+
+  function episodeRangeSummary(range) {
+    if (!range) return "Enter a range to preview the episodes.";
+    if (range.error) return range.error;
+    return "Episodes " + range.start + "–" + range.end + " (" +
+      range.total + " positions). First: " + range.first +
+      ". Last: " + range.last + ". " + range.episodes.length +
+      " unassigned episodes will be added; " + range.skipped +
+      " already assigned episodes will be left alone.";
+  }
+
   function updateArcMatchPreview() {
-    const total = matchingUnassignedEpisodes(arcName.value).length;
-    arcPreview.textContent = total
-      ? total + " unassigned " + (total === 1 ? "episode matches" : "episodes match") +
-        " this arc name. " + (arcAutofill.checked ? "They will be added when you create it." : "Auto-fill is turned off.")
-      : "No unassigned episodes match this exact arc name. You can still create the arc.";
+    const range = episodeRange(arcRange.value);
+    const total = range ? (range.episodes?.length || 0) :
+      matchingUnassignedEpisodes(arcName.value).length;
+    arcPreview.textContent = range
+      ? episodeRangeSummary(range) +
+        (arcAutofill.checked ? "" : " Auto-fill is turned off.")
+      : total
+        ? total + " unassigned " + (total === 1 ? "episode matches" : "episodes match") +
+          " this arc name. " + (arcAutofill.checked ? "They will be added when you create it." : "Auto-fill is turned off.")
+        : "No unassigned episodes match this exact arc name. You can still create the arc.";
+    $("arc-create").disabled = !!range?.error;
     $("arc-create").textContent = arcAutofill.checked && total
       ? "Create arc + add " + total + (total === 1 ? " episode" : " episodes")
       : "Create arc";
@@ -700,6 +766,7 @@ dialog::backdrop{background:#05050bc9}
   function addArc() {
     suggestedArcs = suggestArcNames();
     arcName.value = "";
+    arcRange.value = "";
     arcAutofill.checked = true;
     renderArcSuggestions();
     arcDialog.showModal();
@@ -712,7 +779,14 @@ dialog::backdrop{background:#05050bc9}
     if (feedSections().some(c => c.parentId == null && c.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
       notify("That arc already exists. Choose a different name."); return;
     }
-    const matched = arcAutofill.checked ? matchingUnassignedEpisodes(name) : [];
+    const range = episodeRange(arcRange.value);
+    if (range?.error) {
+      notify(range.error);
+      arcRange.focus();
+      return;
+    }
+    const matched = arcAutofill.checked
+      ? (range ? range.episodes : matchingUnassignedEpisodes(name)) : [];
     backup();
     const id = Math.min(0, ...library.collections.map(c => Number(c.id))) - 1;
     const position = Math.max(-1, ...feedSections().filter(c => c.parentId == null).map(c => Number(c.position)||0)) + 1;
@@ -730,6 +804,7 @@ dialog::backdrop{background:#05050bc9}
     render(); saveInBrowser();
   }
   arcName.addEventListener("input", renderArcSuggestions);
+  arcRange.addEventListener("input", updateArcMatchPreview);
   arcAutofill.addEventListener("change", updateArcMatchPreview);
   arcName.addEventListener("keydown", event => {
     if (event.key === "Enter") { event.preventDefault(); createArc(); }
@@ -753,6 +828,56 @@ dialog::backdrop{background:#05050bc9}
       ". Other arc assignments were left unchanged.");
     render(); saveInBrowser();
   }
+  const rangeDialog = $("range-dialog");
+  const rangeValue = $("range-value");
+  const rangePreview = $("range-preview");
+  const rangeApply = $("range-apply");
+  let rangeTarget = null;
+
+  function previewExistingRange() {
+    const range = episodeRange(rangeValue.value);
+    rangePreview.textContent = episodeRangeSummary(range);
+    rangeApply.disabled = !range || !!range.error || !range.episodes.length;
+    rangeApply.textContent = range && !range.error
+      ? "Add " + range.episodes.length + " episodes" : "Add episodes";
+  }
+  function openExistingRange(section) {
+    if (!section || ident(section.subscriptionId) !== ident(activeFeed)) return;
+    rangeTarget = section.id;
+    $("range-title").textContent = "Add episodes to " + section.name;
+    rangeValue.value = "";
+    previewExistingRange();
+    rangeDialog.showModal();
+    rangeValue.focus();
+  }
+  function applyExistingRange() {
+    if (!library || rangeTarget == null) return;
+    const section = feedSections().find(c=>ident(c.id)===ident(rangeTarget));
+    const range = episodeRange(rangeValue.value);
+    if (!section || !range || range.error || !range.episodes.length) {
+      notify(range?.error || "No unassigned episodes in that range.");
+      return;
+    }
+    backup();
+    for (const ep of range.episodes) {
+      library.placements.push({
+        subscriptionId:activeFeed, collectionId:section.id, episodeKey:ep.key
+      });
+    }
+    rangeDialog.close(); rangeTarget = null;
+    selection.clear(); selectionAnchor = null;
+    notify("Added " + range.episodes.length + " episodes to " + section.name +
+      " from range " + range.start + "–" + range.end +
+      ". Previously assigned episodes were left alone.");
+    render(); saveInBrowser();
+  }
+  rangeValue.addEventListener("input", previewExistingRange);
+  rangeValue.addEventListener("keydown", event=>{
+    if(event.key==="Enter") {event.preventDefault();if(!rangeApply.disabled) applyExistingRange();}
+  });
+  $("range-cancel").addEventListener("click",()=>rangeDialog.close());
+  rangeApply.addEventListener("click",applyExistingRange);
+
   function removeArc(section) {
     if (!section || ident(section.subscriptionId) !== ident(activeFeed)) return;
     const ids = descendants(section.id);
@@ -888,7 +1013,10 @@ dialog::backdrop{background:#05050bc9}
         (count === 1 ? "episode" : "episodes"),
         () => fillExistingArc(active), "add-arc-btn"));
     }
-    if (active) head.append(button("Remove arc", () => removeArc(active), "add-arc-btn"));
+    if (active) {
+      head.append(button("Add episode range", () => openExistingRange(active), "add-arc-btn"));
+      head.append(button("Remove arc", () => removeArc(active), "add-arc-btn"));
+    }
     head.append(button("Auto-organise", reviewAutomaticOrganisation, "add-arc-btn"));
     head.append(button("+ Add arc", addArc, "primary add-arc-btn"));
     main.append(head);
