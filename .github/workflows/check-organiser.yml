@@ -27,5 +27,33 @@ jobs:
           if (/<script[^>]+src=/.test(html) || /\bfetch\s*\(/.test(code)) {
             throw new Error('Editor must remain self-contained and make no fetch requests');
           }
-          console.log('Organiser JavaScript syntax and privacy checks passed');
+          // Smoke-test actual title grouping against examples from the library.
+          const start = code.indexOf('function suggestedArcBase(title) {');
+          const end = code.indexOf('function suggestArcNames()', start);
+          if (start < 0 || end < 0) throw Error('Arc matching helpers missing');
+          const episodes = [
+            {key:'gaslight1', title:'Cthulhu by Gaslight Part 1 | Omnihedral'},
+            {key:'gaslight2', title:'Cthulhu by Gaslight Part 2 | Omnihedral'},
+            {key:'gaslight3', title:'Cthulhu by Gaslight Part 3 | Omnihedral'},
+            {key:'time1', title:'Time Without Tide Part 1'},
+            {key:'other', title:'Cthulhu by Gaslight: Behind the Scenes'}
+          ];
+          const helpers = new Function('links', 'feedEpisodes',
+            code.slice(start, end) + '; return {suggestedArcBase,matchingUnassignedEpisodes};')(
+            () => [{episodeKey:'gaslight3'}], () => episodes
+          );
+          if (helpers.suggestedArcBase(episodes[0].title).name !== 'Cthulhu by Gaslight') {
+            throw Error('Part / source suffix not removed correctly');
+          }
+          const exact = helpers.matchingUnassignedEpisodes('Cthulhu by Gaslight').map(e => e.key);
+          if (exact.join(',') !== 'gaslight1,gaslight2') {
+            throw Error('Automatic matching must include exact unassigned parts only');
+          }
+          if (helpers.matchingUnassignedEpisodes('Gaslight').length) {
+            throw Error('Loose substring matches are unsafe');
+          }
+          if (helpers.matchingUnassignedEpisodes('Time Without Tide').length !== 1) {
+            throw Error('Single part matching failed');
+          }
+          console.log('Organiser JavaScript, privacy and arc auto-fill checks passed');
           NODE
