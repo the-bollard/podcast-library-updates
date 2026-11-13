@@ -47,8 +47,10 @@ dialog{color:var(--text);background:var(--panel);border:1px solid var(--line);bo
 dialog::backdrop{background:#05050bc9}
 .arc-dialog-inner{padding:22px;display:flex;flex-direction:column;gap:13px;max-height:calc(100vh - 45px)}
 .arc-dialog-inner h2{font-size:22px;margin:0}.arc-dialog-inner p{margin:0}
-.arc-dialog-inner input{background:#25252d;border:1px solid #55545b;border-radius:9px;padding:11px 12px;width:100%;min-height:44px}
+.arc-dialog-inner input[type=text]{background:#25252d;border:1px solid #55545b;border-radius:9px;padding:11px 12px;width:100%;min-height:44px}
 .arc-dialog-inner label{font-size:13px;font-weight:700}
+.arc-dialog-inner .arc-autofill-option{display:flex;align-items:center;gap:9px;cursor:pointer;font-weight:500}
+.arc-autofill-option input[type=checkbox]{width:18px;height:18px;flex:none;accent-color:var(--orange)}
 .arc-dialog-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .suggestions{display:flex;flex-direction:column;gap:5px;overflow-y:auto;min-height:0;max-height:300px}
 .suggestion{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;flex-wrap:wrap;background:#272731;font-weight:550}
@@ -109,12 +111,17 @@ dialog::backdrop{background:#05050bc9}
 <dialog id="arc-dialog" aria-labelledby="arc-dialog-title">
   <div class="arc-dialog-inner">
     <h2 id="arc-dialog-title">Add a new arc</h2>
-    <p class="subtle">Suggested names are taken from episode titles. Choose one to fill in the name, or type your own.</p>
+    <p class="subtle">Pick a suggested name or type your own. Matching unassigned episodes can be added automatically when you create the arc.</p>
     <label for="arc-name">Arc name</label>
     <input id="arc-name" type="text" maxlength="120" autocomplete="off" placeholder="e.g. Cthulhu by Gaslight">
+    <label class="arc-autofill-option" for="arc-autofill">
+      <input id="arc-autofill" type="checkbox" checked>
+      <span>Automatically add matching unassigned episodes</span>
+    </label>
+    <p id="arc-match-preview" class="subtle" aria-live="polite">Select a name to preview matches.</p>
     <div>
       <strong>Suggested from your episodes</strong>
-      <p class="subtle">Names with matching parts are grouped together. This only creates an arc, it won't move episodes automatically.</p>
+      <p class="subtle">Suggestions group titles like Part 1 and Part 2. Already organised episodes are never moved.</p>
     </div>
     <div id="arc-suggestions" class="suggestions" aria-live="polite"></div>
     <div class="arc-dialog-actions">
@@ -357,6 +364,8 @@ dialog::backdrop{background:#05050bc9}
   }
   const arcDialog = $("arc-dialog");
   const arcName = $("arc-name");
+  const arcAutofill = $("arc-autofill");
+  const arcPreview = $("arc-match-preview");
   const arcSuggestions = $("arc-suggestions");
   let suggestedArcs = [];
 
@@ -375,10 +384,21 @@ dialog::backdrop{background:#05050bc9}
     return {name: withoutPart, numbered: withoutPart !== cleaned};
   }
 
+  // Exact, case-insensitive base-title matching only. Never alter an episode
+  // already assigned to a section, and never guess from loose substrings.
+  function matchingUnassignedEpisodes(name) {
+    const base = name.trim().toLocaleLowerCase();
+    const assigned = new Set(links().map(p => p.episodeKey));
+    if (!base) return [];
+    return feedEpisodes().filter(episode =>
+      !assigned.has(episode.key) &&
+      suggestedArcBase(episode.title).name.toLocaleLowerCase() === base
+    );
+  }
+
   function suggestArcNames() {
     const assigned = new Set(links().map(p => p.episodeKey));
-    const unassigned = feedEpisodes().filter(e => !assigned.has(e.key));
-    const candidates = unassigned.length ? unassigned : feedEpisodes();
+    const candidates = feedEpisodes().filter(e => !assigned.has(e.key));
     const existing = new Set(feedSections().map(c => c.name.trim().toLocaleLowerCase()));
     const groups = new Map();
     for (const episode of candidates) {
@@ -398,8 +418,19 @@ dialog::backdrop{background:#05050bc9}
       .map(group => ({name:group.name, count:group.keys.size}));
   }
 
+  function updateArcMatchPreview() {
+    const total = matchingUnassignedEpisodes(arcName.value).length;
+    arcPreview.textContent = total
+      ? total + " unassigned " + (total === 1 ? "episode matches" : "episodes match") +
+        " this arc name. " + (arcAutofill.checked ? "They will be added when you create it." : "Auto-fill is turned off.")
+      : "No unassigned episodes match this exact arc name. You can still create the arc.";
+    $("arc-create").textContent = arcAutofill.checked && total
+      ? "Create arc + add " + total + (total === 1 ? " episode" : " episodes")
+      : "Create arc";
+  }
   function renderArcSuggestions() {
     arcSuggestions.replaceChildren();
+    updateArcMatchPreview();
     const filter = arcName.value.trim().toLocaleLowerCase();
     const matches = suggestedArcs.filter(item => item.name.toLocaleLowerCase().includes(filter));
     matches.slice(0, 30).forEach(item => {
@@ -425,6 +456,7 @@ dialog::backdrop{background:#05050bc9}
   function addArc() {
     suggestedArcs = suggestArcNames();
     arcName.value = "";
+    arcAutofill.checked = true;
     renderArcSuggestions();
     arcDialog.showModal();
     arcName.focus();
@@ -436,21 +468,47 @@ dialog::backdrop{background:#05050bc9}
     if (feedSections().some(c => c.parentId == null && c.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
       notify("That arc already exists. Choose a different name."); return;
     }
+    const matched = arcAutofill.checked ? matchingUnassignedEpisodes(name) : [];
     backup();
     const id = Math.min(0, ...library.collections.map(c => Number(c.id))) - 1;
     const position = Math.max(-1, ...feedSections().filter(c => c.parentId == null).map(c => Number(c.position)||0)) + 1;
     library.collections.push({id, subscriptionId:activeFeed, parentId:null, name, position});
+    for (const episode of matched) {
+      library.placements.push({
+        subscriptionId: activeFeed, collectionId: id, episodeKey: episode.key
+      });
+    }
     arcDialog.close();
     activeSection = id; selection.clear(); selectionAnchor = null;
-    notify("Arc added: " + name + ". You can now move episodes into it.");
+    notify("Arc added: " + name + ". " + matched.length +
+      (matched.length === 1 ? " matching episode added." : " matching episodes added.") +
+      " Existing assignments were left unchanged.");
     render(); saveInBrowser();
   }
   arcName.addEventListener("input", renderArcSuggestions);
+  arcAutofill.addEventListener("change", updateArcMatchPreview);
   arcName.addEventListener("keydown", event => {
     if (event.key === "Enter") { event.preventDefault(); createArc(); }
   });
   $("arc-cancel").addEventListener("click", () => arcDialog.close());
   $("arc-create").addEventListener("click", createArc);
+  function fillExistingArc(section) {
+    if (!section || ident(section.subscriptionId) !== ident(activeFeed)) return;
+    const matched = matchingUnassignedEpisodes(section.name);
+    if (!matched.length) {
+      notify("No unassigned episodes exactly match " + section.name + ".");
+      return;
+    }
+    backup();
+    matched.forEach(episode => library.placements.push({
+      subscriptionId: activeFeed, collectionId: section.id, episodeKey: episode.key
+    }));
+    selection.clear(); selectionAnchor = null;
+    notify("Added " + matched.length + " matching " +
+      (matched.length === 1 ? "episode" : "episodes") + " to " + section.name +
+      ". Other arc assignments were left unchanged.");
+    render(); saveInBrowser();
+  }
   function pickFeed(feedId) { activeFeed = feedId; activeSection = "all"; selection.clear(); selectionAnchor = null; search = ""; render(); }
   function pickSection(id) { activeSection = id; selection.clear(); selectionAnchor = null; search = ""; render(); }
   function renderSidebar() {
@@ -543,6 +601,12 @@ dialog::backdrop{background:#05050bc9}
     heading.append(el("h2","",title));
     heading.append(el("p","subtle","Tick episodes or hold Shift and click another to select a whole range. Arc changes save automatically in this browser. Download JSON only when you're ready to import into Podcasts."));
     head.append(heading);
+    if (active && active.parentId == null) {
+      const count = matchingUnassignedEpisodes(active.name).length;
+      if (count) head.append(button("Auto-fill " + count + " matching " +
+        (count === 1 ? "episode" : "episodes"),
+        () => fillExistingArc(active), "add-arc-btn"));
+    }
     head.append(button("+ Add arc", addArc, "primary add-arc-btn"));
     main.append(head);
     const toolbar = el("div","toolbar");
