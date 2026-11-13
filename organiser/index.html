@@ -336,7 +336,10 @@ dialog::backdrop{background:#05050bc9}
     return new Set(links().filter(p => ids.has(ident(p.collectionId))).map(p => p.episodeKey)).size;
   };
   const backup = () => {
-    history.push({collections: structuredClone(library.collections), placements: structuredClone(library.placements)});
+    history.push({collections: structuredClone(library.collections),
+      placements: structuredClone(library.placements),
+      deletedCollections: structuredClone(library.deletedCollections || []),
+      version: library.version});
     if (history.length > 25) history.shift();
     $("undo").disabled = false;
   };
@@ -345,7 +348,7 @@ dialog::backdrop{background:#05050bc9}
   };
   const put = (parent, ...children) => children.forEach(child => parent.append(child));
   function validate(data) {
-    if (!data || data.format !== "podcasts-organiser" || data.version !== 1 ||
+    if (!data || data.format !== "podcasts-organiser" || ![1,2].includes(data.version) ||
         !["subscriptions", "episodes", "collections", "placements", "baselinePlacements"].every(k => Array.isArray(data[k])))
       throw Error("This isn't a compatible Podcasts Organiser file. Export a fresh copy from the Android app.");
     if (data.episodes.length > 100000 || data.collections.length > 10000 || data.placements.length > 500000)
@@ -371,7 +374,10 @@ dialog::backdrop{background:#05050bc9}
   $("undo").addEventListener("click", () => {
     const previous = history.pop();
     if (!previous) return;
-    library.collections = previous.collections; library.placements = previous.placements;
+    library.collections = previous.collections;
+    library.placements = previous.placements;
+    library.deletedCollections = previous.deletedCollections;
+    library.version = previous.version;
     selection.clear(); selectionAnchor = null; $("undo").disabled = history.length === 0;
     notify("Last edit undone."); render(); saveInBrowser();
   });
@@ -747,6 +753,40 @@ dialog::backdrop{background:#05050bc9}
       ". Other arc assignments were left unchanged.");
     render(); saveInBrowser();
   }
+  function removeArc(section) {
+    if (!section || ident(section.subscriptionId) !== ident(activeFeed)) return;
+    const ids = descendants(section.id);
+    const childCount = ids.size - 1;
+    const removedAssignments = links().filter(link => ids.has(ident(link.collectionId))).length;
+    const explanation = "Remove \"" + section.name + "\"?" +
+      (childCount ? "\n\nThis also removes " + childCount + " nested section(s)." : "") +
+      (removedAssignments ? "\n\n" + removedAssignments + " episode assignments will be removed." : "") +
+      "\n\nThe episodes, downloads and listening history will remain in Podcasts. " +
+      "You can undo this in the website before importing.";
+    if (!confirm(explanation)) return;
+    backup();
+    const removed = library.collections.filter(c =>
+      ident(c.subscriptionId) === ident(activeFeed) && ids.has(ident(c.id)));
+    library.collections = library.collections.filter(c =>
+      !(ident(c.subscriptionId) === ident(activeFeed) && ids.has(ident(c.id))));
+    library.placements = library.placements.filter(p =>
+      !(ident(p.subscriptionId) === ident(activeFeed) && ids.has(ident(p.collectionId))));
+    const deleted = library.deletedCollections || [];
+    for (const c of removed) {
+      if (Number(c.id) > 0 && !deleted.some(d => ident(d.id) === ident(c.id))) {
+        deleted.push({id:c.id, subscriptionId:c.subscriptionId});
+      }
+    }
+    library.deletedCollections = deleted;
+    // Version 2 tells older Android apps to reject this file rather than
+    // silently ignore collection deletions.
+    if (removed.some(c => Number(c.id) > 0)) library.version = 2;
+    activeSection = "all";
+    selection.clear(); selectionAnchor = null;
+    notify("Removed " + section.name + " from this draft. Episode data is safe. " +
+      "Use Undo to restore it, or import into Podcasts 0.5.9+ to apply the removal.");
+    render(); saveInBrowser();
+  }
   function pickFeed(feedId) { activeFeed = feedId; activeSection = "all"; selection.clear(); selectionAnchor = null; search = ""; render(); }
   function pickSection(id) { activeSection = id; selection.clear(); selectionAnchor = null; search = ""; render(); }
   function renderSidebar() {
@@ -775,7 +815,9 @@ dialog::backdrop{background:#05050bc9}
         "label" + (ident(activeSection) === ident(section.id) ? " active" : ""));
       const ren = button("Rename", () => editName(section), "edit");
       ren.setAttribute("aria-label", "Rename " + section.name);
-      put(row,b,ren); side.append(row);
+      const rem = button("Remove", () => removeArc(section), "edit");
+      rem.setAttribute("aria-label", "Remove " + section.name);
+      put(row,b,ren,rem); side.append(row);
     });
     side.append(el("p","footer","Season folders stay attached to their parent arc. You can assign episodes directly to the arc."));
     side.append(button("Open a different JSON", showWelcome, "muted"));
@@ -846,6 +888,7 @@ dialog::backdrop{background:#05050bc9}
         (count === 1 ? "episode" : "episodes"),
         () => fillExistingArc(active), "add-arc-btn"));
     }
+    if (active) head.append(button("Remove arc", () => removeArc(active), "add-arc-btn"));
     head.append(button("Auto-organise", reviewAutomaticOrganisation, "add-arc-btn"));
     head.append(button("+ Add arc", addArc, "primary add-arc-btn"));
     main.append(head);
