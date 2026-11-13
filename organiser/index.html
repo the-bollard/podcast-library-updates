@@ -446,11 +446,11 @@ dialog::backdrop{background:#05050bc9}
     // Consider only 1–99 and require multiple distinct numbered episodes
     // before proposing an automatically created arc. That prevents a lone
     // title like "Resident Evil 2" becoming its own arc.
-    const bareSuffix = /(?:\\s+|[-–—]\\s*)(0?[1-9]|[1-9]\\d)\\s*$/u;
+    const bareSuffix = /(?:\s+|[-–—]\s*)(0?[1-9]|[1-9]\d)\s*$/u;
     for (const section of segments) {
       const match = section.match(bareSuffix);
       if (!match) continue;
-      const name = section.slice(0, match.index).replace(/\\s*[-–—:]\\s*$/u, "").trim();
+      const name = section.slice(0, match.index).replace(/\s*[-–—:]\s*$/u, "").trim();
       if (name.length >= 4) {
         return {name, numbered:true, bareNumber:Number(match[1])};
       }
